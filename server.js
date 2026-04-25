@@ -163,6 +163,64 @@ class AIService {
   }
 }
 const aiService = new AIService();
+// =====================
+// 🧠 HYBRID QUESTION ENGINE
+// =====================
+async function getNextQuestion(userId, session) {
+  const weakTopics = getWeakTopics(userId);
+  const avgScore = getAverageScore(userId);
+
+  const useAI = Math.random() < 0.5;
+  const preferredTopic = weakTopics[0] || null;
+
+  // 🤖 AI
+  if (useAI) {
+    try {
+      const difficulty =
+        avgScore > 8 ? "hard" :
+        avgScore > 6 ? "medium" : "easy";
+
+      const prompt = `
+Zadaj pytanie do rozmowy o Kartę Polaka.
+
+Temat: ${preferredTopic || "ogólny"}
+Poziom: ${difficulty}
+
+Zwróć JSON:
+{
+  "question": "...",
+  "keywords": ["...", "..."],
+  "hint": "...",
+  "intro": "..."
+}
+`;
+
+      const response = await aiService.call(prompt);
+      const data = safeJSONParse(response, null);
+
+      if (data && data.question) {
+        return {
+          id: `ai_${Date.now()}`,
+          topic: preferredTopic || "ai",
+          difficulty,
+          question: data.question,
+          answerKeywords: data.keywords || [],
+          hint: data.hint || "",
+          intro: data.intro || "Pytanie AI"
+        };
+      }
+    } catch (e) {
+      console.log("AI error → fallback static");
+    }
+  }
+
+  // 📦 STATIC
+  const filtered = preferredTopic
+    ? questionBank.filter(q => q.topic === preferredTopic)
+    : questionBank;
+
+  return filtered[Math.floor(Math.random() * filtered.length)];
+}
 
 // =====================
 // СЕРТИФІКАТИ
@@ -238,8 +296,8 @@ class InterviewController {
         }
         return res.json(final);
       }
-      const nextIdx = (session.askedTopics.length) % questionBank.length;
-      const nextQ = questionBank[nextIdx];
+      const nextQ = await getNextQuestion(userId, session);
+      
       session.currentQuestion = nextQ;
       session.currentTopic = nextQ.topic;
       session.askedTopics.push(nextQ.topic);
