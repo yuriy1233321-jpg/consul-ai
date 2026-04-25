@@ -321,3 +321,13 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+import path from "path";
+
+app.use(express.static("client/dist"));
+
+app.get("*", (req, res) => {
+  if (!req.path.startsWith("/api")) {
+    res.sendFile(path.resolve("client/dist/index.html"));
+  }
+});
