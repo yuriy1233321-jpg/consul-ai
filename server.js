@@ -162,49 +162,83 @@ function getAverageScore(userId) {
 // =====================
 class AIService {
   async _callOnce(prompt) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CONFIG.OPENAI_TIMEOUT);
-    try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${CONFIG.API_KEY}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.2
-        }),
-        signal: controller.signal
-      });
-      const data = await res.json();
-      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-        throw new Error("Invalid OpenAI response structure");
-      }
-      return data.choices[0].message.content;
-    } catch (err) {
-      console.error("OpenAI call failed:", err.message);
-      throw err;
-    } finally {
-      clearTimeout(timeout);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CONFIG.OPENAI_TIMEOUT);
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${CONFIG.API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2
+      }),
+      signal: controller.signal
+    });
+
+    // ❗ HTTP помилка (401, 429, 500 і т.д.)
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("❌ OpenAI HTTP ERROR:", res.status, text);
+      throw new Error(`OpenAI HTTP ${res.status}`);
     }
+
+    // ❗ JSON парсинг
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      console.error("❌ JSON parse error");
+      throw new Error("Invalid JSON from OpenAI");
+    }
+
+    // ❗ структура відповіді
+    if (!data?.choices?.[0]?.message) {
+      console.error("❌ Bad OpenAI structure:", JSON.stringify(data).slice(0, 300));
+      throw new Error("Invalid OpenAI response structure");
+    }
+
+    const content = data.choices[0].message.content;
+
+    // ❗ пуста відповідь
+    if (!content || typeof content !== "string") {
+      throw new Error("Empty OpenAI response");
+    }
+
+    return content;
+
+  } catch (err) {
+    if (err.name === "AbortError") {
+      console.error("❌ OpenAI TIMEOUT");
+      throw new Error("OpenAI timeout");
+    }
+
+    console.error("❌ OpenAI FULL ERROR:", err.message);
+    throw err;
+
+  } finally {
+    clearTimeout(timeout);
   }
+}
 
   async call(prompt, retries = 2) {
-    for (let i = 0; i <= retries; i++) {
-      try {
-        return await this._callOnce(prompt);
-      } catch (err) {
-        if (i < retries) {
-          console.log(`Retrying OpenAI... (attempt ${i+1})`);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          continue;
-        }
-        throw err;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await this._callOnce(prompt);
+    } catch (err) {
+      if (i < retries) {
+        console.log(`🔁 Retry OpenAI ${i + 1}`);
+        await new Promise(r => setTimeout(r, 500));
+        continue;
       }
+      return null;
     }
   }
+}
 
   async evaluateAnswer(question, answer, userId, session) {
     const keywords = session.currentQuestion?.answerKeywords || [];
@@ -457,25 +491,29 @@ class InterviewController {
       return res.json({ type: "question", intro: first.intro || "Proszę odpowiedzieć.", question: first.question, hint: first.hint, index: 1, total: CONFIG.QUESTIONS_PER_SESSION, progress: 0 });
     }
     if (session.step === "ready") {
-      if (!message) return res.json({ type: "error", message: "No answer" });
+  try {
+    if (!message) return res.json({ type: "error", message: "No answer" });
 
-      const evaluation = await aiService.evaluateAnswer(session.currentQuestion.question, message, userId, session);
+    const evaluation = await aiService.evaluateAnswer(
+      session.currentQuestion.question,
+      message,
+      userId,
+      session
+    );
 
-      // Додаємо логування для аналітики
-      console.log(JSON.stringify({
-        timestamp: new Date().toISOString(),
-        userId,
-        questionId: session.currentQuestion.id,
-        score: evaluation.totalScore,
-        feedback: evaluation.feedback?.slice(0, 100)
-      }));
+    // FOLLOW-UP
+    if (evaluation.totalScore < 5 && (session.followUpCount || 0) < 2) {
+      session.followUpCount = (session.followUpCount || 0) + 1;
 
-      // FOLLOW-UP (до інкремента)
-      if (evaluation.totalScore < 5 && (session.followUpCount || 0) < 2) {
-        session.followUpCount = (session.followUpCount || 0) + 1;
-        const followUp = await generateFollowUpQuestion(session.currentQuestion.question, message, evaluation.weaknesses);
-        if (followUp && followUp.question && followUp.question.length <= 200) {
-          const followUpQuestion = {
+      try {
+        const followUp = await generateFollowUpQuestion(
+          session.currentQuestion.question,
+          message,
+          evaluation.weaknesses
+        );
+
+        if (followUp && followUp.question) {
+          session.currentQuestion = {
             id: `followup_${Date.now()}`,
             topic: session.currentTopic,
             question: followUp.question,
@@ -483,16 +521,53 @@ class InterviewController {
             intro: "Dopytam bardziej szczegółowo:",
             answerKeywords: []
           };
-          session.currentQuestion = followUpQuestion;
+
           return res.json({
             type: "question",
-            intro: followUpQuestion.intro,
-            question: followUpQuestion.question,
-            hint: followUpQuestion.hint,
+            intro: session.currentQuestion.intro,
+            question: session.currentQuestion.question,
+            hint: session.currentQuestion.hint,
             followUp: true
           });
         }
+      } catch (e) {
+        console.log("Follow-up error", e);
       }
+    }
+
+    // SAFE fallback evaluation
+    const score = evaluation.totalScore || 5;
+
+    session.answers.push(score);
+    session.questionIndex++;
+
+    const nextQ = await getNextQuestion(userId, session);
+
+    session.currentQuestion = nextQ;
+    session.currentTopic = nextQ.topic;
+
+    return res.json({
+      type: "next_question",
+      evaluation: {
+        score,
+        feedback: evaluation.feedback || "OK"
+      },
+      nextQuestion: {
+        question: nextQ.question,
+        hint: nextQ.hint
+      }
+    });
+
+  } catch (err) {
+    console.error("🔥 CRITICAL ERROR:", err);
+
+    // 🔥 fallback — щоб не було 502
+    return res.json({
+      type: "error",
+      message: "Temporary issue, try again"
+    });
+  }
+}
 
       // Збереження відповіді
       session.answers.push(evaluation.totalScore);
