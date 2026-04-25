@@ -1,341 +1,323 @@
 
 import express from "express";
 import cors from "cors";
-import helmet from "helmet";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import Fuse from "fuse.js";
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { body, validationResult } from "express-validator";
-import crypto from "crypto";
-import Fuse from "fuse.js";
-import QRCode from "qrcode";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import pg from "pg";
-import Redis from "ioredis";
-import winston from "winston";
-import * as Sentry from "@sentry/node";
 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 // =====================
 // КОНФІГУРАЦІЯ
 // =====================
-const {
-  DATABASE_URL,
-  REDIS_URL,
-  AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY,
-  AWS_REGION,
-  AWS_CERTIFICATE_BUCKET,
-  JWT_SECRET,
-  OPENAI_API_KEY,
-  ADMIN_API_KEY,
-  CERT_SECRET,
-  APP_URL,
-  SENTRY_DSN,
-  NODE_ENV = "production",
-  PORT = 3000,
-} = process.env;
+const CONFIG = {
+  API_KEY: process.env.OPENAI_API_KEY,
+  QUESTIONS_PER_SESSION: 10,
+  ADMIN_API_KEY: process.env.ADMIN_API_KEY || "admin123",
+  CERT_SECRET: process.env.CERT_SECRET || crypto.randomBytes(32).toString("hex"),
+  APP_URL: process.env.APP_URL || "http://localhost:3000",
+  JWT_SECRET: process.env.JWT_SECRET,
+};
 
-// Перевірка критичних змінних
-if (!DATABASE_URL) throw new Error("DATABASE_URL required");
-if (!REDIS_URL) throw new Error("REDIS_URL required");
-if (!JWT_SECRET) throw new Error("JWT_SECRET required");
-if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY required");
-
-// Ініціалізація логера
-const logger = winston.createLogger({
-  level: NODE_ENV === "production" ? "info" : "debug",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: "error.log", level: "error" }),
-    new winston.transports.File({ filename: "combined.log" }),
-  ],
-});
-
-// Sentry (додаткова діагностика)
-if (SENTRY_DSN) {
-  Sentry.init({ dsn: SENTRY_DSN, environment: NODE_ENV });
+if (!CONFIG.API_KEY) {
+  console.error("❌ OPENAI_API_KEY is required");
+  process.exit(1);
+}
+if (!CONFIG.JWT_SECRET) {
+  console.error("❌ JWT_SECRET is required");
+  process.exit(1);
 }
 
-const app = express();
-
 // =====================
-// БАЗА ДАНИХ (POSTGRESQL)
-// =====================
-const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
-pool.on("error", (err) => logger.error("Unexpected PG error", err));
-
-// Redis
-const redis = new Redis(REDIS_URL);
-redis.on("error", (err) => logger.error("Redis error", err));
-
-// S3 для сертифікатів
-const s3 = new S3Client({ region: AWS_REGION, credentials: { accessKeyId: AWS_ACCESS_KEY_ID, secretAccessKey: AWS_SECRET_ACCESS_KEY } });
-
-// =====================
-// MIDDLEWARE
+// БЕЗПЕКА
 // =====================
 app.use(helmet());
-app.use(cors({ origin: APP_URL, credentials: true }));
+app.use(cors({ origin: CONFIG.APP_URL, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static("client/dist"));
 
-// Ініціалізація таблиць (якщо ще не створені)
-async function initDatabase() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      name TEXT,
-      plan TEXT DEFAULT 'free',
-      subscription_status TEXT DEFAULT 'active',
-      stripe_customer_id TEXT,
-      stripe_subscription_id TEXT,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS user_sessions (
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-      step TEXT,
-      answers JSONB,
-      asked_topics JSONB,
-      question_index INTEGER DEFAULT 0,
-      progress INTEGER DEFAULT 0,
-      finished BOOLEAN DEFAULT FALSE,
-      current_question JSONB,
-      current_topic TEXT,
-      started_at TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS results (
-      id SERIAL PRIMARY KEY,
-      user_id TEXT REFERENCES users(id),
-      final_report JSONB,
-      answers JSONB,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS memory (
-      user_id TEXT PRIMARY KEY REFERENCES users(id),
-      weak_topics JSONB,
-      last_scores JSONB,
-      grammar_issues JSONB,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-  logger.info("Database tables ready");
+// =====================
+// ДОПОМІЖНІ ФУНКЦІЇ
+// =====================
+function detectGender(name) {
+  if (!name) return "male";
+  const n = name.toLowerCase().trim();
+  if (n.endsWith("a") && !["kuba", "barnaba"].includes(n)) return "female";
+  return "male";
 }
-await initDatabase();
-
-// Допоміжні функції для роботи з БД
-async function getUserById(id) {
-  const res = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
-  return res.rows[0];
+function getPolishForm(name) {
+  return detectGender(name) === "female" ? "Pani" : "Pan";
 }
-async function getUserByEmail(email) {
-  const res = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-  return res.rows[0];
-}
-async function createUser(id, email, hashedPassword, name) {
-  await pool.query(
-    "INSERT INTO users (id, email, password, name) VALUES ($1, $2, $3, $4)",
-    [id, email, hashedPassword, name]
-  );
-  // Ініціалізуємо порожню сесію і пам'ять
-  await pool.query("INSERT INTO user_sessions (user_id) VALUES ($1)", [id]);
-  await pool.query("INSERT INTO memory (user_id, weak_topics, last_scores, grammar_issues) VALUES ($1, '{}'::JSONB, '[]'::JSONB, '[]'::JSONB)", [id]);
-}
-async function updateUserSubscription(userId, data) {
-  await pool.query(
-    "UPDATE users SET plan = $1, subscription_status = $2, stripe_customer_id = $3, stripe_subscription_id = $4, updated_at = NOW() WHERE id = $5",
-    [data.plan, data.status, data.stripeCustomerId, data.stripeSubscriptionId, userId]
-  );
+function safeJSONParse(str, fallback = {}) {
+  try { return JSON.parse(str); } catch { return fallback; }
 }
 
 // =====================
-// JWT AUTH
+// ФАЙЛОВІ СХОВИЩА
+// =====================
+class DataStore {
+  constructor(file) { this.file = file; this.data = this.load(); }
+  load() { try { return JSON.parse(fs.readFileSync(this.file, "utf8")); } catch { return []; } }
+  save() { fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2)); }
+  findAll() { return this.data; }
+  findOne(pred) { return this.data.find(pred); }
+  insert(item) { this.data.push(item); this.save(); return item; }
+  update(pred, updater) { const idx = this.data.findIndex(pred); if (idx !== -1) { this.data[idx] = updater(this.data[idx]); this.save(); return true; } return false; }
+}
+
+const usersDB = new DataStore("users.json");
+const resultsDB = new DataStore("results.json");
+const memoryStore = new DataStore("memory.json");
+
+// =====================
+// БАНК ПИТАНЬ
+// =====================
+let questionBank = [];
+try {
+  if (fs.existsSync("questions.json")) {
+    questionBank = JSON.parse(fs.readFileSync("questions.json", "utf8"));
+    console.log(`✅ Loaded ${questionBank.length} questions`);
+  } else {
+    questionBank = [
+      { id:"sym_001", topic:"polish symbols", difficulty:"easy", question:"Jakie są trzy polskie symbole narodowe?", answerKeywords:["orzeł","flaga","hymn"], hint:"Orzeł, flaga, hymn", intro:"Symbole narodowe" }
+    ];
+    fs.writeFileSync("questions.json", JSON.stringify(questionBank, null, 2));
+  }
+} catch(e) { console.error("Question bank error", e); }
+
+// =====================
+// НЕЧІТКИЙ SCORER
+// =====================
+class FuzzyScorer {
+  calculateScore(answer, keywords) {
+    const ans = answer.toLowerCase();
+    let matched = 0;
+    for (let kw of keywords) if (ans.includes(kw.toLowerCase())) matched++;
+    const score = (matched / keywords.length) * 10;
+    return { score: Math.min(10, Math.round(score)), matched, total: keywords.length };
+  }
+}
+const fuzzyScorer = new FuzzyScorer();
+
+// =====================
+// ПАМ'ЯТЬ
+// =====================
+function getMemory(userId) {
+  let mem = memoryStore.findOne(u => u.userId === userId);
+  if (!mem) {
+    mem = { userId, weakTopics: {}, lastScores: [], totalAnswers: 0 };
+    memoryStore.insert(mem);
+  }
+  return mem;
+}
+function updateMemory(userId, topic, score) {
+  const mem = getMemory(userId);
+  mem.lastScores.push(score);
+  if (mem.lastScores.length > 10) mem.lastScores.shift();
+  if (score < 5) mem.weakTopics[topic] = (mem.weakTopics[topic] || 0) + 1;
+  mem.totalAnswers++;
+  memoryStore.update(u => u.userId === userId, () => mem);
+}
+function getWeakTopics(userId) {
+  const mem = getMemory(userId);
+  return Object.entries(mem.weakTopics).sort((a,b)=>b[1]-a[1]).map(([t])=>t);
+}
+function getAverageScore(userId) {
+  const mem = getMemory(userId);
+  if (mem.lastScores.length === 0) return 5;
+  return mem.lastScores.reduce((a,b)=>a+b,0) / mem.lastScores.length;
+}
+
+// =====================
+// AI СЕРВІС
+// =====================
+class AIService {
+  async call(prompt) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CONFIG.API_KEY}` },
+      body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.2 })
+    });
+    const data = await res.json();
+    return data.choices[0].message.content;
+  }
+  async evaluateAnswer(question, answer) {
+    const prompt = `Oceń odpowiedź do Karty Polaka. Pytanie: "${question}" Odpowiedź: "${answer}". Zwróć JSON: { "score":0-10, "feedback":"...", "corrected":"..." }`;
+    try {
+      const resp = await this.call(prompt);
+      const evalResult = safeJSONParse(resp, { score: 5, feedback: "Dziękuję." });
+      evalResult.score = Math.min(10, Math.max(0, evalResult.score));
+      return evalResult;
+    } catch { return { score: 5, feedback: "Dziękuję za odpowiedź." }; }
+  }
+}
+const aiService = new AIService();
+
+// =====================
+// СЕРТИФІКАТИ
+// =====================
+function generateToken(userId, score, date) {
+  const payload = `${userId}:${score}:${date}`;
+  const sig = crypto.createHmac("sha256", CONFIG.CERT_SECRET).update(payload).digest("hex");
+  return `${Buffer.from(payload).toString("base64")}.${sig}`;
+}
+function verifyToken(token) {
+  const [b64, sig] = token.split(".");
+  if (!b64 || !sig) return null;
+  const payload = Buffer.from(b64, "base64").toString();
+  const expected = crypto.createHmac("sha256", CONFIG.CERT_SECRET).update(payload).digest("hex");
+  if (sig !== expected) return null;
+  const [userId, score, date] = payload.split(":");
+  return { userId, score: parseFloat(score), date: parseInt(date) };
+}
+
+// =====================
+// КОНТРОЛЕР ІНТЕРВ'Ю
+// =====================
+class InterviewController {
+  getSession(userId) {
+    let user = usersDB.findOne(u => u.userId === userId);
+    if (user && !user.session?.finished) return user.session;
+    else return this.createSession(userId);
+  }
+  createSession(userId) {
+    const session = { userId, step: "ask_name", answers: [], askedTopics: [], questionIndex: 0, finished: false };
+    usersDB.update(u => u.userId === userId, u => ({ ...u, session })) || usersDB.insert({ userId, session, createdAt: Date.now() });
+    return session;
+  }
+  async handleMessage(req, res) {
+    const userId = req.user.userId;
+    let { message } = req.body;
+    let session = this.getSession(userId);
+    if (session.finished) this.createSession(userId);
+    session = this.getSession(userId);
+
+    if (session.step === "ask_name") {
+      session.step = "waiting_name";
+      return res.json({ type: "question", question: "Dzień dobry. Proszę podać swoje imię." });
+    }
+    if (session.step === "waiting_name") {
+      if (!message || message.trim().length < 2) return res.json({ type: "question", question: "Proszę podać poprawne imię." });
+      session.name = message.trim();
+      session.step = "ready";
+      const first = questionBank[0];
+      session.currentQuestion = first;
+      session.currentTopic = first.topic;
+      session.askedTopics = session.askedTopics || [];
+      session.askedTopics.push(first.topic);
+      return res.json({ type: "question", intro: first.intro || "Proszę odpowiedzieć.", question: first.question, hint: first.hint, index: 1, total: CONFIG.QUESTIONS_PER_SESSION, progress: 0 });
+    }
+    if (session.step === "ready") {
+      if (!message) return res.json({ type: "error", message: "No answer" });
+      const evaluation = await aiService.evaluateAnswer(session.currentQuestion.question, message);
+      session.answers.push(evaluation.score);
+      session.questionIndex++;
+      session.progress = Math.round((session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100);
+      updateMemory(userId, session.currentTopic, evaluation.score);
+      if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
+        const total = session.answers.reduce((a,b)=>a+b,0);
+        const avg = total / session.answers.length;
+        const weak = getWeakTopics(userId);
+        const final = { type: "final", level: avg>=8?"bardzo dobry":avg>=6?"dobry":"dostateczny", recommendation: avg>=6?"ready":"not_ready", averageScore: avg.toFixed(1), weakTopics: weak, progress: 100 };
+        session.finished = true;
+        resultsDB.insert({ userId, answers: session.answers, finalReport: final, createdAt: new Date().toISOString() });
+        if (final.recommendation === "ready") {
+          const cert = { verificationUrl: `${CONFIG.APP_URL}/api/certificate/verify?token=${generateToken(userId, avg, Date.now())}` };
+          final.certificate = cert;
+        }
+        return res.json(final);
+      }
+      const nextIdx = (session.askedTopics.length) % questionBank.length;
+      const nextQ = questionBank[nextIdx];
+      session.currentQuestion = nextQ;
+      session.currentTopic = nextQ.topic;
+      session.askedTopics.push(nextQ.topic);
+      return res.json({ type: "next_question", evaluation: { score: evaluation.score, feedback: evaluation.feedback }, nextQuestion: { intro: nextQ.intro || "Proszę odpowiedzieć.", question: nextQ.question, hint: nextQ.hint, index: session.questionIndex+1 }, progress: session.progress, current: session.questionIndex, total: CONFIG.QUESTIONS_PER_SESSION });
+    }
+    return res.json({ type: "error", message: "Unknown step" });
+  }
+}
+const interviewController = new InterviewController();
+
+// =====================
+// АВТЕНТИФІКАЦІЯ
 // =====================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(" ")[1];
+  const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: "Access token required" });
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, CONFIG.JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: "Invalid or expired token" });
     req.user = user;
     next();
   });
 }
 
-// =====================
-// ОБМЕЖЕННЯ (RATE LIMIT)
-// =====================
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, skipSuccessfulRequests: true, keyGenerator: (req) => req.ip });
-const chatLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator: (req) => req.user?.userId || req.ip });
-const adminLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, skipSuccessfulRequests: true });
+const chatLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
 
-// =====================
-// ФУНКЦІЇ ДЛЯ СТАНУ СЕСІЇ В POSTGRES + КЕШ REDIS
-// =====================
-async function getSession(userId) {
-  const cached = await redis.get(`session:${userId}`);
-  if (cached) return JSON.parse(cached);
-  const res = await pool.query("SELECT * FROM user_sessions WHERE user_id = $1", [userId]);
-  const session = res.rows[0] || null;
-  if (session) await redis.setex(`session:${userId}`, 3600, JSON.stringify(session));
-  return session;
-}
-async function updateSession(userId, data) {
-  const session = await getSession(userId);
-  const updated = { ...session, ...data, updated_at: new Date() };
-  await pool.query(
-    `UPDATE user_sessions SET step = $1, answers = $2, asked_topics = $3, question_index = $4, progress = $5, finished = $6, current_question = $7, current_topic = $8, started_at = $9, updated_at = NOW() WHERE user_id = $10`,
-    [
-      updated.step, JSON.stringify(updated.answers || []), JSON.stringify(updated.asked_topics || []),
-      updated.question_index, updated.progress, updated.finished,
-      JSON.stringify(updated.current_question), updated.current_topic,
-      updated.started_at, userId
-    ]
-  );
-  await redis.setex(`session:${userId}`, 3600, JSON.stringify(updated));
-  return updated;
-}
-// Аналогічно для memory
-async function getMemory(userId) {
-  const cached = await redis.get(`memory:${userId}`);
-  if (cached) return JSON.parse(cached);
-  const res = await pool.query("SELECT * FROM memory WHERE user_id = $1", [userId]);
-  const mem = res.rows[0] || { weak_topics: {}, last_scores: [], grammar_issues: [] };
-  await redis.setex(`memory:${userId}`, 3600, JSON.stringify(mem));
-  return mem;
-}
-async function updateMemory(userId, data) {
-  await pool.query(
-    "UPDATE memory SET weak_topics = $1, last_scores = $2, grammar_issues = $3, updated_at = NOW() WHERE user_id = $4",
-    [JSON.stringify(data.weak_topics), JSON.stringify(data.last_scores), JSON.stringify(data.grammar_issues), userId]
-  );
-  await redis.setex(`memory:${userId}`, 3600, JSON.stringify(data));
-}
-
-// =====================
-// ЛОГІКА СУБСКРИПЦІЙ З REDIS (ATOMIC DAILY LIMIT)
-// =====================
-async function canAskQuestion(userId) {
-  const today = new Date().toISOString().slice(0, 10);
-  const key = `daily:${userId}:${today}`;
-  const used = await redis.incr(key);
-  if (used === 1) await redis.expire(key, 86400);
-  // Отримуємо план користувача з БД (можна кешувати)
-  const user = await getUserById(userId);
-  const limit = user?.plan === "free" ? 3 : Infinity;
-  return used <= limit;
-}
-
-// =====================
-// ОСНОВНІ КЛАСИ (Core AI – практично не змінені)
-// =====================
-// (Тут код FuzzyScorer, AIService, InterviewController тощо – беріть з попередньої версії,
-//  але замість локальних сховищ використовуйте БД через виклики вище)
-// Через обмеження довжини я покажу лише скелет. Реальний код можна взяти з v5.2,
-//  замінивши `usersDB`, `memoryEngine`, `resultsDB` на виклики до PostgreSQL/Redis.
-class FuzzyScorer { /* як було */ }
-class AIService {
-  async evaluateAnswer(question, answer) { /* як було, але з OpenAI */ }
-}
-const aiService = new AIService();
-class InterviewController {
-  async handleMessage(req, res) {
-    const userId = req.user.userId;
-    let session = await getSession(userId);
-    if (!session) {
-      session = { step: "ask_name", answers: [], asked_topics: [], question_index: 0, progress: 0, finished: false };
-      await updateSession(userId, session);
-    }
-    // ... логіка як у v5.2, але всі оновлення пишуться через updateSession та updateMemory
-    // Важливо: після фіналу зберігаємо результат у таблицю "results"
-  }
-}
-const interviewController = new InterviewController();
-
-// =====================
-// API МАРШРУТИ
-// =====================
-app.post("/api/register",
-  authLimiter,
-  body("email").isEmail().normalizeEmail(),
-  body("password").isLength({ min: 6 }),
-  body("name").optional().isString().trim(),
+app.post('/api/register', authLimiter,
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 6 }),
+  body('name').optional().isString().trim(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const { email, password, name } = req.body;
-    const existing = await getUserByEmail(email);
+    const existing = usersDB.findOne(u => u.email === email);
     if (existing) return res.status(400).json({ error: "User already exists" });
     const hashed = await bcrypt.hash(password, 10);
-    const id = `user_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
-    await createUser(id, email, hashed, name || email.split("@")[0]);
-    res.status(201).json({ message: "User created", userId: id });
+    const userId = `user_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
+    usersDB.insert({ id: userId, email, password: hashed, name: name || email.split('@')[0], createdAt: Date.now() });
+    res.status(201).json({ message: "User created", userId });
   }
 );
 
-app.post("/api/login",
-  authLimiter,
-  body("email").isEmail(),
-  body("password").notEmpty(),
+app.post('/api/login', authLimiter,
+  body('email').isEmail(),
+  body('password').notEmpty(),
   async (req, res) => {
     const { email, password } = req.body;
-    const user = await getUserByEmail(email);
-    if (!user || !(await bcrypt.compare(password, user.password)))
-      return res.status(401).json({ error: "Invalid credentials" });
-    const token = jwt.sign({ userId: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: "30d" });
+    const user = usersDB.findOne(u => u.email === email);
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+    const token = jwt.sign({ userId: user.id, email: user.email, name: user.name }, CONFIG.JWT_SECRET, { expiresIn: "30d" });
     res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
   }
 );
 
-app.post("/chat", authenticateToken, chatLimiter, async (req, res) => {
-  // Перевірка ліміту питань
-  const canAsk = await canAskQuestion(req.user.userId);
-  if (!canAsk) return res.json({ type: "limit_reached", message: "Osiągnięto limit darmowych pytań. Wykup PRO!", upgradeUrl: "/pricing" });
-  return interviewController.handleMessage(req, res);
-});
-
-app.get("/health", (req, res) => res.json({ status: "healthy", version: "5.2", uptime: process.uptime() }));
-app.get("/api/admin/stats", adminLimiter, (req, res) => {
-  const apiKey = req.headers["x-api-key"];
-  if (apiKey !== ADMIN_API_KEY) return res.status(401).json({ error: "Unauthorized" });
-  // Тут статистика з БД
-  res.json({ message: "Admin stats – implement with DB queries" });
-});
-
-app.get("/api/certificate/verify", async (req, res) => {
+app.post('/chat', authenticateToken, chatLimiter, (req, res) => interviewController.handleMessage(req, res));
+app.get("/health", (req, res) => res.json({ status: "healthy", version: "5.2" }));
+app.get("/api/certificate/verify", (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).json({ error: "Missing token" });
-  const data = verifyCertificateToken(token);
+  const data = verifyToken(token);
   if (!data) return res.status(400).json({ error: "Invalid certificate" });
-  // Генеруємо завантажувальне посилання з S3
-  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: AWS_CERTIFICATE_BUCKET, Key: `${data.userId}.pdf` }), { expiresIn: 3600 });
-  res.json({ valid: true, userId: data.userId, score: data.score, issuedAt: new Date(data.date).toISOString(), downloadUrl: url });
+  res.json({ valid: true, userId: data.userId, score: data.score, issuedAt: new Date(data.date).toISOString() });
 });
 
-// Catch-all для SPA
+// Адмінка (захист через API-ключ)
+app.use("/api/admin", (req, res, next) => {
+  const key = req.headers["x-api-key"];
+  if (key !== CONFIG.ADMIN_API_KEY) return res.status(401).json({ error: "Unauthorized" });
+  next();
+});
+app.get("/api/admin/stats", (req, res) => res.json({ users: usersDB.findAll().length, results: resultsDB.findAll().length }));
+
+// SPA fallback
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api")) return;
   res.sendFile(path.resolve("client/dist/index.html"));
 });
 
-// =====================
-// ЗАВЕРШЕННЯ
-// =====================
-const server = app.listen(PORT, () => logger.info(`🚀 Server running on port ${PORT}`));
-
-process.on("SIGTERM", async () => {
-  logger.info("SIGTERM received, closing connections...");
-  await pool.end();
-  await redis.quit();
-  server.close(() => process.exit(0));
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
