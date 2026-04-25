@@ -492,7 +492,9 @@ class InterviewController {
     }
     if (session.step === "ready") {
   try {
-    if (!message) return res.json({ type: "error", message: "No answer" });
+    if (!message) {
+      return res.json({ type: "error", message: "No answer" });
+    }
 
     const evaluation = await aiService.evaluateAnswer(
       session.currentQuestion.question,
@@ -503,48 +505,84 @@ class InterviewController {
 
     // FOLLOW-UP
     if (evaluation.totalScore < 5 && (session.followUpCount || 0) < 2) {
-      session.followUpCount = (session.followUpCount || 0) + 1;
+      session.followUpCount++;
 
-      try {
-        const followUp = await generateFollowUpQuestion(
-          session.currentQuestion.question,
-          message,
-          evaluation.weaknesses
-        );
+      const followUp = await generateFollowUpQuestion(
+        session.currentQuestion.question,
+        message,
+        evaluation.weaknesses
+      );
 
-        if (followUp && followUp.question) {
-          session.currentQuestion = {
-            id: `followup_${Date.now()}`,
-            topic: session.currentTopic,
-            question: followUp.question,
-            hint: followUp.hint || "",
-            intro: "Dopytam bardziej szczegółowo:",
-            answerKeywords: []
-          };
+      if (followUp && followUp.question) {
+        session.currentQuestion = {
+          id: `followup_${Date.now()}`,
+          topic: session.currentTopic,
+          question: followUp.question,
+          hint: followUp.hint || "",
+          intro: "Dopytam bardziej szczegółowo:",
+          answerKeywords: []
+        };
 
-          return res.json({
-            type: "question",
-            intro: session.currentQuestion.intro,
-            question: session.currentQuestion.question,
-            hint: session.currentQuestion.hint,
-            followUp: true
-          });
-        }
-      } catch (e) {
-        console.log("Follow-up error", e);
+        return res.json({
+          type: "question",
+          intro: session.currentQuestion.intro,
+          question: session.currentQuestion.question,
+          hint: session.currentQuestion.hint,
+          followUp: true
+        });
       }
     }
 
-    // SAFE fallback evaluation
+    // ✅ ЗБЕРЕЖЕННЯ (ПЕРЕНЕСЕНО ВСЕРЕДИНУ try)
     const score = evaluation.totalScore || 5;
 
     session.answers.push(score);
     session.questionIndex++;
+    session.progress = Math.round(
+      (session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100
+    );
 
+    updateMemory(userId, session.currentTopic, score);
+
+    // answersDetails
+    if (!session.answersDetails) session.answersDetails = [];
+    session.answersDetails.push({
+      question: session.currentQuestion.question,
+      answer: message,
+      score,
+      feedback: evaluation.feedback,
+      strengths: evaluation.strengths,
+      weaknesses: evaluation.weaknesses
+    });
+    if (session.answersDetails.length > 10) session.answersDetails.shift();
+
+    // ✅ ЗАВЕРШЕННЯ
+    if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
+      const total = session.answers.reduce((a, b) => a + b, 0);
+      const avg = total / session.answers.length;
+
+      const final = {
+        type: "final",
+        level: avg >= 8 ? "bardzo dobry" : avg >= 6 ? "dobry" : "dostateczny",
+        recommendation: avg >= 6 ? "ready" : "not_ready",
+        averageScore: avg.toFixed(1),
+        progress: 100
+      };
+
+      session.finished = true;
+
+      return res.json(final);
+    }
+
+    // reset follow-up
+    if (score >= 6) session.followUpCount = 0;
+
+    // наступне питання
     const nextQ = await getNextQuestion(userId, session);
 
     session.currentQuestion = nextQ;
     session.currentTopic = nextQ.topic;
+    session.askedQuestions.push(nextQ.id);
 
     return res.json({
       type: "next_question",
@@ -554,14 +592,16 @@ class InterviewController {
       },
       nextQuestion: {
         question: nextQ.question,
-        hint: nextQ.hint
-      }
+        hint: nextQ.hint,
+        intro: nextQ.intro
+      },
+      progress: session.progress
     });
 
   } catch (err) {
     console.error("🔥 CRITICAL ERROR:", err);
 
-    // 🔥 fallback — щоб не було 502
+    // ❗ НІКОЛИ не даємо 502
     return res.json({
       type: "error",
       message: "Temporary issue, try again"
