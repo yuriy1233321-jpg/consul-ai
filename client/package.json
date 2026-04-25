@@ -1,18 +1,14 @@
-
 {
-  "name": "client",
-  "private": true,
+  "name": "consul-ai",
   "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build"
+    "start": "node server.js",
+    "build": "cd client && npm install && npm run build"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "axios": "^1.6.0"
-  },
-  "devDependencies": {
-    "vite": "^5.0.0"
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
   }
 }
