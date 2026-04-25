@@ -312,22 +312,28 @@ app.use("/api/admin", (req, res, next) => {
   if (key !== CONFIG.ADMIN_API_KEY) return res.status(401).json({ error: "Unauthorized" });
   next();
 });
-app.get("/api/admin/stats", (req, res) => res.json({ users: usersDB.findAll().length, results: resultsDB.findAll().length }));
 
-// SPA fallback
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api")) return;
-  res.sendFile(path.resolve("client/dist/index.html"));
+app.get("/api/admin/stats", (req, res) => {
+  res.json({
+    users: usersDB.findAll().length,
+    results: resultsDB.findAll().length
+  });
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
-import path from "path";
-
+// =====================
+// 🌐 FRONTEND (ВАЖЛИВО)
+// =====================
 app.use(express.static("client/dist"));
 
 app.get("*", (req, res) => {
   if (!req.path.startsWith("/api")) {
     res.sendFile(path.resolve("client/dist/index.html"));
   }
+});
+
+// =====================
+// 🚀 START SERVER
+// =====================
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
