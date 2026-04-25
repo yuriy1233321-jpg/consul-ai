@@ -23,3 +23,7 @@
     "express-validator": "^7.0.1"
   }
 }
+"scripts": {
+  "start": "node server.js",
+  "build": "cd client && npm install && npm run build"
+}
