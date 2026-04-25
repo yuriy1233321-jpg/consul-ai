@@ -1,18 +1,24 @@
 {
-  "name": "client",
-  "private": true,
-  "version": "1.0.0",
+  "name": "consul-ai",
+  "version": "5.2.0",
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "start": "node server.js",
+    "build:client": "cd client && npm install && npm run build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "axios": "^1.6.2"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.8"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2",
+    "fuse.js": "^7.0.0",
+    "qrcode": "^1.5.3",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1",
+    "express-validator": "^7.0.1"
   }
 }
