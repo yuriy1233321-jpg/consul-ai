@@ -1,3 +1,0 @@
-[build]
-builder = "NIXPACKS"
-buildCommand = "npm install --prefix client && npm run build --prefix client"
