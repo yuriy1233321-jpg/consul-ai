@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
 import { login, register, sendMessage } from './services/api';
 
 function App() {
-  // Стан авторизації
-  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -15,19 +13,16 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Стан чату (тільки після авторизації)
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const messagesEndRef = useRef(null);
 
-  // Автоскрол
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Якщо користувач залогінений – починаємо інтерв'ю (один раз при завантаженні)
   useEffect(() => {
     if (isAuthenticated) {
       startInterview();
@@ -73,8 +68,7 @@ function App() {
     e.preventDefault();
     setAuthError('');
     try {
-      const res = await register(email, password, name);
-      // Після реєстрації відразу логінимось
+      await register(email, password, name);
       const loginRes = await login(email, password);
       const { token, user: userData } = loginRes.data;
       localStorage.setItem('token', token);
@@ -104,11 +98,9 @@ function App() {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setInput('');
     setLoading(true);
-
     try {
       const res = await sendMessage(userMsg);
       const data = res.data;
-
       if (data.type === 'question') {
         setMessages(prev => [...prev, {
           role: 'consul',
@@ -155,7 +147,6 @@ function App() {
     }
   };
 
-  // Екран авторизації (якщо не залогінений)
   if (!isAuthenticated) {
     return (
       <div style={{ maxWidth: '500px', margin: '50px auto', padding: '20px', fontFamily: 'system-ui' }}>
@@ -184,10 +175,9 @@ function App() {
     );
   }
 
-  // Основний інтерфейс чату (залогінений)
+  // Główny interfejs czatu
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px', fontFamily: 'system-ui' }}>
-      {/* Header */}
       <div style={{ background: 'linear-gradient(135deg, #dc143c, #8b0000)', color: 'white', padding: '12px 24px', borderRadius: '16px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ margin: 0 }}>🎯 CONSUL.AI</h1>
@@ -199,7 +189,6 @@ function App() {
         </div>
       </div>
 
-      {/* Progress bar */}
       {progress > 0 && (
         <div style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
@@ -212,7 +201,6 @@ function App() {
         </div>
       )}
 
-      {/* Messages area */}
       <div style={{ background: '#f9f9f9', borderRadius: '16px', padding: '16px', height: '500px', overflowY: 'auto', marginBottom: '20px' }}>
         {messages.map((msg, idx) => (
           <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: '16px' }}>
@@ -254,7 +242,6 @@ function App() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area */}
       <div style={{ display: 'flex', gap: '10px' }}>
         <textarea
           value={input}
