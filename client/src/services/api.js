@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 const api = axios.create({
@@ -6,14 +5,14 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// токен
+// 🔐 Додаємо токен до кожного запиту
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// авто logout
+// 🚪 Автоматичний вихід при 401
 api.interceptors.response.use(
   res => res,
   err => {
@@ -26,7 +25,20 @@ api.interceptors.response.use(
   }
 );
 
-// 🔥 ОЦЕ ГОЛОВНЕ (експорти)
+// 🧱 НОВИЙ ПЕРЕХОПЛЮВАЧ ДЛЯ PAYWALL / EXPIRED
+api.interceptors.response.use(
+  (response) => {
+    // Якщо відповідь містить paywall або expired – диспатчимо подію
+    if (response.data?.type === 'paywall' || response.data?.type === 'expired') {
+      // Створюємо кастомну подію, яку зможе зловити App.jsx
+      window.dispatchEvent(new CustomEvent('show-paywall', { detail: response.data }));
+    }
+    return response;
+  },
+  (error) => Promise.reject(error) // залишаємо обробку помилок як було
+);
+
+// 📦 API функції
 export const register = (email, password, name) =>
   api.post('/api/register', { email, password, name });
 
