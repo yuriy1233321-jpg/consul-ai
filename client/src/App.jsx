@@ -25,10 +25,11 @@ function App() {
   }, [messages]);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      startInterview();
-    }
-  }, [isAuthenticated]);
+  console.log("AUTH:", isAuthenticated);
+  if (isAuthenticated) {
+    startInterview().catch(err => console.error(err));
+  }
+}, [isAuthenticated]);
 
   const startInterview = async () => {
     try {
