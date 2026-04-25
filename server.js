@@ -181,7 +181,6 @@ async function getNextQuestion(userId, session) {
         avgScore > 6 ? "medium" : "easy";
 
       const prompt = `
-const prompt = `
 Return ONLY valid JSON. No text.
 
 {
