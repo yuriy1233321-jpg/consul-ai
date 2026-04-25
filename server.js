@@ -323,18 +323,26 @@ app.get("/api/admin/stats", (req, res) => {
 // =====================
 // 🌐 FRONTEND (FIXED)
 // =====================
-const __dirname = new URL('.', import.meta.url).pathname;
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 app.use(express.static(path.join(__dirname, "client/dist")));
 
 app.get("*", (req, res) => {
   if (!req.path.startsWith("/api")) {
     const filePath = path.join(__dirname, "client/dist/index.html");
-    
+
     if (fs.existsSync(filePath)) {
       res.sendFile(filePath);
     } else {
       res.send("Frontend not built");
     }
   }
+});
+console.log("STARTING SERVER...");
+
+app.listen(PORT, () => {
+  console.log("🚀 Server running on port " + PORT);
 });
