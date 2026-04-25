@@ -1,2 +1,0 @@
-# consul-ai
-Ai-konsul
