@@ -174,43 +174,51 @@ async function getNextQuestion(userId, session) {
   const preferredTopic = weakTopics[0] || null;
 
   // 🤖 AI
-  if (useAI) {
-    try {
-      const difficulty =
-        avgScore > 8 ? "hard" :
-        avgScore > 6 ? "medium" : "easy";
+if (useAI) {
+  try {
+    const difficulty =
+      avgScore > 8 ? "hard" :
+      avgScore > 6 ? "medium" : "easy";
 
-      const prompt = `Return ONLY valid JSON`;
+    const prompt = `
+You are a Polish consul conducting an interview for Karta Polaka.
+
+Generate ONE question.
+
+Requirements:
+- language: Polish
+- topic: ${preferredTopic || "general knowledge about Poland"}
+- difficulty: ${difficulty}
+- must sound formal and realistic
+
+Return ONLY valid JSON:
 
 {
-  "question": "...",
-  "keywords": ["...", "..."],
-  "hint": "...",
-  "intro": "..."
+  "question": "string",
+  "keywords": ["string", "string"],
+  "hint": "string",
+  "intro": "short intro sentence"
 }
-
-Topic: ${preferredTopic || "general"}
-Difficulty: ${difficulty}
 `;
 
-      const response = await aiService.call(prompt);
-      const data = safeJSONParse(response, null);
+    const response = await aiService.call(prompt);
+    const data = safeJSONParse(response, null);
 
-      if (data && data.question) {
-        return {
-          id: `ai_${Date.now()}`,
-          topic: preferredTopic || "ai",
-          difficulty,
-          question: data.question,
-          answerKeywords: data.keywords || [],
-          hint: data.hint || "",
-          intro: data.intro || "Pytanie AI"
-        };
-      }
-    } catch (e) {
-      console.log("AI error → fallback static");
+    if (data && data.question) {
+      return {
+        id: `ai_${Date.now()}`,
+        topic: preferredTopic || "ai",
+        difficulty,
+        question: data.question,
+        answerKeywords: data.keywords || [],
+        hint: data.hint || "",
+        intro: data.intro || "Pytanie AI"
+      };
     }
+  } catch (e) {
+    console.log("AI error → fallback static");
   }
+}
 
   // 📦 STATIC
   // ❌ виключаємо вже використані теми
