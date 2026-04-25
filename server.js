@@ -28,6 +28,7 @@ const CONFIG = {
   CERT_SECRET: process.env.CERT_SECRET || crypto.randomBytes(32).toString("hex"),
   APP_URL: process.env.APP_URL || "http://localhost:3000",
   JWT_SECRET: process.env.JWT_SECRET,
+  OPENAI_TIMEOUT: 8000,
 };
 
 if (!CONFIG.API_KEY) {
@@ -45,7 +46,7 @@ if (!CONFIG.JWT_SECRET) {
 app.use(helmet());
 app.use(cors({ origin: CONFIG.APP_URL, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static("client/dist"));
+// ❌ Видалено дублюючий static зверху – залишиться тільки в кінці
 
 // =====================
 // ДОПОМІЖНІ ФУНКЦІЇ
@@ -60,16 +61,26 @@ function getPolishForm(name) {
   return detectGender(name) === "female" ? "Pani" : "Pan";
 }
 function safeJSONParse(str, fallback = {}) {
-  try { return JSON.parse(str); } catch { return fallback; }
+  try {
+    let clean = str.replace(/```json\s*|\s*```/g, '').trim();
+    if (!clean) return fallback;
+    return JSON.parse(clean);
+  } catch {
+    return fallback;
+  }
 }
 
 // =====================
-// ФАЙЛОВІ СХОВИЩА
+// ФАЙЛОВІ СХОВИЩА (з атомарним записом)
 // =====================
 class DataStore {
   constructor(file) { this.file = file; this.data = this.load(); }
   load() { try { return JSON.parse(fs.readFileSync(this.file, "utf8")); } catch { return []; } }
-  save() { fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2)); }
+  save() {
+    const tempFile = this.file + ".tmp";
+    fs.writeFileSync(tempFile, JSON.stringify(this.data, null, 2));
+    fs.renameSync(tempFile, this.file);
+  }
   findAll() { return this.data; }
   findOne(pred) { return this.data.find(pred); }
   insert(item) { this.data.push(item); this.save(); return item; }
@@ -111,7 +122,7 @@ class FuzzyScorer {
 const fuzzyScorer = new FuzzyScorer();
 
 // =====================
-// ПАМ'ЯТЬ
+// ПАМ'ЯТЬ (з обмеженням розміру weakTopics)
 // =====================
 function getMemory(userId) {
   let mem = memoryStore.findOne(u => u.userId === userId);
@@ -125,7 +136,14 @@ function updateMemory(userId, topic, score) {
   const mem = getMemory(userId);
   mem.lastScores.push(score);
   if (mem.lastScores.length > 10) mem.lastScores.shift();
-  if (score < 5) mem.weakTopics[topic] = (mem.weakTopics[topic] || 0) + 1;
+  if (score < 5) {
+    mem.weakTopics[topic] = (mem.weakTopics[topic] || 0) + 1;
+    // Обмеження розміру weakTopics
+    const entries = Object.entries(mem.weakTopics);
+    if (entries.length > 20) {
+      mem.weakTopics = Object.fromEntries(entries.slice(0, 10));
+    }
+  }
   mem.totalAnswers++;
   memoryStore.update(u => u.userId === userId, () => mem);
 }
@@ -140,106 +158,232 @@ function getAverageScore(userId) {
 }
 
 // =====================
-// AI СЕРВІС
+// AI СЕРВІС (з retry, таймаутом, обробкою помилок)
 // =====================
 class AIService {
-  async call(prompt) {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CONFIG.API_KEY}` },
-      body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.2 })
-    });
-    const data = await res.json();
-    return data.choices[0].message.content;
+  async _callOnce(prompt) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONFIG.OPENAI_TIMEOUT);
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${CONFIG.API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2
+        }),
+        signal: controller.signal
+      });
+      const data = await res.json();
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error("Invalid OpenAI response structure");
+      }
+      return data.choices[0].message.content;
+    } catch (err) {
+      console.error("OpenAI call failed:", err.message);
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  async evaluateAnswer(question, answer) {
-    const prompt = `Oceń odpowiedź do Karty Polaka. Pytanie: "${question}" Odpowiedź: "${answer}". Zwróć JSON: { "score":0-10, "feedback":"...", "corrected":"..." }`;
+
+  async call(prompt, retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        return await this._callOnce(prompt);
+      } catch (err) {
+        if (i < retries) {
+          console.log(`Retrying OpenAI... (attempt ${i+1})`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  async evaluateAnswer(question, answer, userId, session) {
+    const keywords = session.currentQuestion?.answerKeywords || [];
+    let fuzzyResult = null;
+    if (keywords.length > 0) {
+      fuzzyResult = fuzzyScorer.calculateScore(answer, keywords);
+      if (fuzzyResult.score >= 8 && answer.length >= 15) {
+        return {
+          totalScore: fuzzyResult.score,
+          feedback: "Dobra odpowiedź.",
+          strengths: ["Poprawna treść"],
+          weaknesses: [],
+          correctedVersion: null,
+          scores: { content: fuzzyResult.score, grammar: fuzzyResult.score, vocabulary: fuzzyResult.score, fluency: fuzzyResult.score, completeness: fuzzyResult.score }
+        };
+      }
+    }
+
+    const prevAnswers = session.answersDetails?.slice(-3).map(a =>
+      `Q: ${a.question}\nA: ${a.answer}\nScore: ${a.score}`
+    ).join('\n') || 'Brak';
+
+    const prompt = `
+Jesteś egzaminatorem do Karty Polaka. Oceń odpowiedź kandydata.
+
+HISTORIA ROZMOWY (ostatnie 3 pytania):
+${prevAnswers}
+
+OBECNE PYTANIE: "${question}"
+OBECNA ODPOWIEDŹ: "${answer}"
+
+Oceń według kryteriów (0-10):
+1. Poprawność merytoryczna (content)
+2. Gramatyka i poprawność językowa (grammar)
+3. Bogactwo słownictwa (vocabulary)
+4. Płynność i spójność (fluency)
+5. Kompletność (completeness)
+
+Dodatkowo:
+- Wypisz maksymalnie 2 mocne strony.
+- Wypisz maksymalnie 2 słabe strony.
+- Podaj poprawioną wersję (jeśli potrzeba).
+- Podaj krótki feedback po polsku.
+
+Zwróć JSON:
+{
+  "scores": {
+    "content": number,
+    "grammar": number,
+    "vocabulary": number,
+    "fluency": number,
+    "completeness": number
+  },
+  "totalScore": number,
+  "strengths": ["string", "string"],
+  "weaknesses": ["string", "string"],
+  "correctedVersion": "string | null",
+  "feedback": "string"
+}
+`;
+
     try {
       const resp = await this.call(prompt);
-      const evalResult = safeJSONParse(resp, { score: 5, feedback: "Dziękuję." });
-      evalResult.score = Math.min(10, Math.max(0, evalResult.score));
+      const evalResult = safeJSONParse(resp, null);
+      if (!evalResult) throw new Error('Invalid JSON');
+      const scores = evalResult.scores;
+      const total = scores ? Object.values(scores).reduce((a,b)=>a+b,0)/5 : evalResult.totalScore;
+      evalResult.totalScore = Math.min(10, Math.max(0, Math.round(total)));
       return evalResult;
-    } catch { return { score: 5, feedback: "Dziękuję za odpowiedź." }; }
+    } catch (err) {
+      console.error('Evaluation error:', err);
+      if (fuzzyResult) return { totalScore: Math.min(fuzzyResult.score, 6), feedback: "Ocena automatyczna", strengths: [], weaknesses: [] };
+      return { totalScore: 5, feedback: 'Dziękuję za odpowiedź.', strengths: [], weaknesses: [] };
+    }
   }
 }
 const aiService = new AIService();
+
 // =====================
-// 🧠 HYBRID QUESTION ENGINE
+// ДОПОМІЖНІ AI-ФУНКЦІЇ
+// =====================
+async function generateAIQuestion(topic, difficulty, userAvgScore) {
+  const prompt = `
+Jesteś konsulem. Wygeneruj jedno pytanie do rozmowy o Kartę Polaka.
+Temat: ${topic}
+Poziom trudności: ${difficulty}
+Średni wynik użytkownika: ${userAvgScore}/10 (niższy = łatwiejsze pytanie)
+
+Pytanie: język polski, konkretne, max 200 znaków.
+Zwróć JSON:
+{
+  "question": "treść",
+  "keywords": ["kluczowe słowo1", "słowo2"],
+  "hint": "podpowiedź",
+  "intro": "krótkie wprowadzenie"
+}
+`;
+  try {
+    const response = await aiService.call(prompt);
+    const parsed = safeJSONParse(response, null);
+    if (!parsed || !parsed.question) return null;
+    if (parsed.question.length > 200) return null;
+    if (!parsed.keywords || parsed.keywords.length === 0) parsed.keywords = [topic];
+    return parsed;
+  } catch (e) {
+    console.log('AI generation failed', e);
+    return null;
+  }
+}
+
+async function generateFollowUpQuestion(originalQuestion, userAnswer, weaknesses) {
+  const safeWeaknesses = (weaknesses || []).join(', ');
+  const prompt = `
+Użytkownik odpowiedział słabo na pytanie: "${originalQuestion}"
+Jego odpowiedź: "${userAnswer}"
+Słabe strony: ${safeWeaknesses}
+
+Zadaj konkretne, prostsze pytanie uzupełniające.
+Zwróć JSON: { "question": "...", "hint": "..." }
+`;
+  try {
+    const resp = await aiService.call(prompt);
+    return safeJSONParse(resp, null);
+  } catch { return null; }
+}
+
+// =====================
+// РОЗУМНИЙ ВИБІР НАСТУПНОГО ПИТАННЯ
 // =====================
 async function getNextQuestion(userId, session) {
   const weakTopics = getWeakTopics(userId);
   const avgScore = getAverageScore(userId);
+  const askedQuestionIds = new Set(session.askedQuestions || []);
 
-  const useAI = Math.random() < 0.5;
-  const preferredTopic = weakTopics[0] || null;
+  let difficulty = 'medium';
+  if (avgScore >= 8) difficulty = 'hard';
+  else if (avgScore <= 5) difficulty = 'easy';
 
-  // 🤖 AI
-if (useAI) {
-  try {
-    const difficulty =
-      avgScore > 8 ? "hard" :
-      avgScore > 6 ? "medium" : "easy";
-
-    const prompt = `
-You are a Polish consul conducting an interview for Karta Polaka.
-
-Generate ONE question.
-
-Requirements:
-- language: Polish
-- topic: ${preferredTopic || "general knowledge about Poland"}
-- difficulty: ${difficulty}
-- must sound formal and realistic
-
-Return ONLY valid JSON:
-
-{
-  "question": "string",
-  "keywords": ["string", "string"],
-  "hint": "string",
-  "intro": "short intro sentence"
-}
-`;
-
-    const response = await aiService.call(prompt);
-    const data = safeJSONParse(response, null);
-
-    if (data && data.question) {
-      return {
-        id: `ai_${Date.now()}`,
-        topic: preferredTopic || "ai",
-        difficulty,
-        question: data.question,
-        answerKeywords: data.keywords || [],
-        hint: data.hint || "",
-        intro: data.intro || "Pytanie AI"
-      };
-    }
-  } catch (e) {
-    console.log("AI error → fallback static");
+  let targetTopic = weakTopics[0] || null;
+  if (!targetTopic) {
+    const allTopics = [...new Set(questionBank.map(q => q.topic))];
+    const askedTopics = session.askedTopics || [];
+    const unused = allTopics.filter(t => !askedTopics.includes(t));
+    targetTopic = unused.length ? unused[0] : allTopics[0];
   }
-}
 
-  // 📦 STATIC
-  // ❌ виключаємо вже використані теми
-const used = session.askedQuestions || [];
-const unused = questionBank.filter(q => !used.includes(q.id));
+  let candidates = questionBank.filter(q =>
+    q.topic === targetTopic &&
+    q.difficulty === difficulty &&
+    !askedQuestionIds.has(q.id)
+  );
+  if (candidates.length === 0) {
+    candidates = questionBank.filter(q => q.topic === targetTopic && !askedQuestionIds.has(q.id));
+  }
+  if (candidates.length === 0) {
+    candidates = questionBank.filter(q => !askedQuestionIds.has(q.id));
+  }
 
-// якщо всі теми вже були — ресет
-const pool = unused.length > 0 ? unused : questionBank;
+  let selected = null;
+  if (candidates.length === 0) {
+    session.askedQuestions = [];
+    selected = questionBank[Math.floor(Math.random() * questionBank.length)];
+  } else {
+    selected = candidates[Math.floor(Math.random() * candidates.length)];
+  }
 
-// якщо є слабка тема — пріоритет
-const filtered = preferredTopic
-  ? pool.filter(q => q.topic === preferredTopic)
-  : pool;
-
-// якщо після фільтра нічого — беремо pool
-const finalPool = filtered.length > 0 ? filtered : pool;
-if (finalPool.length === 0) {
-  return questionBank[Math.floor(Math.random() * questionBank.length)];
-}
-// випадкове питання
-return finalPool[Math.floor(Math.random() * finalPool.length)];
+  const useAI = weakTopics.length > 0 && Math.random() < 0.3 && avgScore < 8;
+  if (useAI && targetTopic) {
+    const aiQuestion = await generateAIQuestion(targetTopic, difficulty, avgScore);
+    if (aiQuestion && aiQuestion.question) {
+      aiQuestion.id = `ai_${Date.now()}`;
+      aiQuestion.topic = targetTopic;
+      aiQuestion.difficulty = difficulty;
+      aiQuestion.answerKeywords = aiQuestion.keywords || [targetTopic];
+      aiQuestion.intro = aiQuestion.intro || "Pytanie od konsula:";
+      return aiQuestion;
+    }
+  }
+  return selected;
 }
 
 // =====================
@@ -271,15 +415,22 @@ class InterviewController {
   }
   createSession(userId) {
     const session = {
-  userId,
-  step: "ask_name",
-  answers: [],
-  askedTopics: [],
-  askedQuestions: [], // 👈 ДОДАВ
-  questionIndex: 0,
-  finished: false
-};
-    usersDB.update(u => u.userId === userId, u => ({ ...u, session })) || usersDB.insert({ userId, session, createdAt: Date.now() });
+      userId,
+      step: "ask_name",
+      answers: [],
+      answersDetails: [],
+      askedTopics: [],
+      askedQuestions: [],
+      questionIndex: 0,
+      followUpCount: 0,
+      finished: false
+    };
+    const existing = usersDB.findOne(u => u.userId === userId);
+    if (existing) {
+      usersDB.update(u => u.userId === userId, u => ({ ...u, session }));
+    } else {
+      usersDB.insert({ userId, session, createdAt: Date.now() });
+    }
     return session;
   }
   async handleMessage(req, res) {
@@ -307,11 +458,60 @@ class InterviewController {
     }
     if (session.step === "ready") {
       if (!message) return res.json({ type: "error", message: "No answer" });
-      const evaluation = await aiService.evaluateAnswer(session.currentQuestion.question, message);
-      session.answers.push(evaluation.score);
+
+      const evaluation = await aiService.evaluateAnswer(session.currentQuestion.question, message, userId, session);
+
+      // Додаємо логування для аналітики
+      console.log(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        userId,
+        questionId: session.currentQuestion.id,
+        score: evaluation.totalScore,
+        feedback: evaluation.feedback?.slice(0, 100)
+      }));
+
+      // FOLLOW-UP (до інкремента)
+      if (evaluation.totalScore < 5 && (session.followUpCount || 0) < 2) {
+        session.followUpCount = (session.followUpCount || 0) + 1;
+        const followUp = await generateFollowUpQuestion(session.currentQuestion.question, message, evaluation.weaknesses);
+        if (followUp && followUp.question && followUp.question.length <= 200) {
+          const followUpQuestion = {
+            id: `followup_${Date.now()}`,
+            topic: session.currentTopic,
+            question: followUp.question,
+            hint: followUp.hint || "",
+            intro: "Dopytam bardziej szczegółowo:",
+            answerKeywords: []
+          };
+          session.currentQuestion = followUpQuestion;
+          return res.json({
+            type: "question",
+            intro: followUpQuestion.intro,
+            question: followUpQuestion.question,
+            hint: followUpQuestion.hint,
+            followUp: true
+          });
+        }
+      }
+
+      // Збереження відповіді
+      session.answers.push(evaluation.totalScore);
       session.questionIndex++;
       session.progress = Math.round((session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100);
-      updateMemory(userId, session.currentTopic, evaluation.score);
+      updateMemory(userId, session.currentTopic, evaluation.totalScore);
+
+      if (!session.answersDetails) session.answersDetails = [];
+      session.answersDetails.push({
+        question: session.currentQuestion.question,
+        answer: message,
+        score: evaluation.totalScore,
+        feedback: evaluation.feedback,
+        strengths: evaluation.strengths,
+        weaknesses: evaluation.weaknesses
+      });
+      if (session.answersDetails.length > 10) session.answersDetails.shift();
+
+      // Перевірка завершення
       if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
         const total = session.answers.reduce((a,b)=>a+b,0);
         const avg = total / session.answers.length;
@@ -325,19 +525,33 @@ class InterviewController {
         }
         return res.json(final);
       }
+
+      if (evaluation.totalScore >= 6) session.followUpCount = 0;
+
       const nextQ = await getNextQuestion(userId, session);
+      session.currentQuestion = nextQ;
+      session.currentTopic = nextQ.topic;
+      session.askedQuestions.push(nextQ.id);
+      if (!session.askedTopics.includes(nextQ.topic)) session.askedTopics.push(nextQ.topic);
 
-session.currentQuestion = nextQ;
-session.currentTopic = nextQ.topic;
-
-// ✅ контроль унікальності
-session.askedQuestions.push(nextQ.id);
-
-// ✅ контроль тем
-if (!session.askedTopics.includes(nextQ.topic)) {
-  session.askedTopics.push(nextQ.topic);
-}
-      return res.json({ type: "next_question", evaluation: { score: evaluation.score, feedback: evaluation.feedback }, nextQuestion: { intro: nextQ.intro || "Proszę odpowiedzieć.", question: nextQ.question, hint: nextQ.hint, index: session.questionIndex+1 }, progress: session.progress, current: session.questionIndex, total: CONFIG.QUESTIONS_PER_SESSION });
+      return res.json({
+        type: "next_question",
+        evaluation: {
+          score: evaluation.totalScore,
+          feedback: evaluation.feedback,
+          strengths: evaluation.strengths?.slice(0,2),
+          weaknesses: evaluation.weaknesses?.slice(0,2)
+        },
+        nextQuestion: {
+          intro: nextQ.intro || "Proszę odpowiedzieć.",
+          question: nextQ.question,
+          hint: nextQ.hint,
+          index: session.questionIndex + 1
+        },
+        progress: session.progress,
+        current: session.questionIndex,
+        total: CONFIG.QUESTIONS_PER_SESSION
+      });
     }
     return res.json({ type: "error", message: "Unknown step" });
   }
@@ -345,7 +559,7 @@ if (!session.askedTopics.includes(nextQ.topic)) {
 const interviewController = new InterviewController();
 
 // =====================
-// АВТЕНТИФІКАЦІЯ
+// АВТЕНТИФІКАЦІЯ ТА МАРШРУТИ
 // =====================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -373,7 +587,7 @@ app.post('/api/register', authLimiter,
     if (existing) return res.status(400).json({ error: "User already exists" });
     const hashed = await bcrypt.hash(password, 10);
     const userId = `user_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
-    usersDB.insert({ id: userId, email, password: hashed, name: name || email.split('@')[0], createdAt: Date.now() });
+    usersDB.insert({ userId, email, password: hashed, name: name || email.split('@')[0], createdAt: Date.now() });
     res.status(201).json({ message: "User created", userId });
   }
 );
@@ -387,8 +601,8 @@ app.post('/api/login', authLimiter,
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
-    const token = jwt.sign({ userId: user.id, email: user.email, name: user.name }, CONFIG.JWT_SECRET, { expiresIn: "30d" });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    const token = jwt.sign({ userId: user.userId, email: user.email, name: user.name }, CONFIG.JWT_SECRET, { expiresIn: "30d" });
+    res.json({ token, user: { id: user.userId, email: user.email, name: user.name } });
   }
 );
 
@@ -402,43 +616,31 @@ app.get("/api/certificate/verify", (req, res) => {
   res.json({ valid: true, userId: data.userId, score: data.score, issuedAt: new Date(data.date).toISOString() });
 });
 
-// Адмінка (захист через API-ключ)
 app.use("/api/admin", (req, res, next) => {
   const key = req.headers["x-api-key"];
   if (key !== CONFIG.ADMIN_API_KEY) return res.status(401).json({ error: "Unauthorized" });
   next();
 });
-
 app.get("/api/admin/stats", (req, res) => {
-  res.json({
-    users: usersDB.findAll().length,
-    results: resultsDB.findAll().length
-  });
+  res.json({ users: usersDB.findAll().length, results: resultsDB.findAll().length });
 });
 
 // =====================
-// 🌐 FRONTEND (FIXED)
+// ФРОНТЕНД
 // =====================
 import { fileURLToPath } from 'url';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 app.use(express.static(path.join(__dirname, "client/dist")));
-
 app.get("*", (req, res) => {
   if (!req.path.startsWith("/api")) {
     const filePath = path.join(__dirname, "client/dist/index.html");
-
-    if (fs.existsSync(filePath)) {
-      res.sendFile(filePath);
-    } else {
-      res.send("Frontend not built");
-    }
+    if (fs.existsSync(filePath)) res.sendFile(filePath);
+    else res.send("Frontend not built");
   }
 });
-console.log("STARTING SERVER...");
 
-app.listen(PORT, () => {
-  console.log("🚀 Server running on port " + PORT);
-});
+// =====================
+// ЗАПУСК
+// =====================
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
