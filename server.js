@@ -104,9 +104,9 @@ class AIService {
     const prompt = `Oceń odpowiedź do Karty Polaka. Pytanie: "${question}" Odpowiedź: "${answer}". Zwróć JSON: { "score":0-10, "feedback":"...", "corrected":"..." }`;
     try {
       const resp = await this.call(prompt);
-      const eval = safeJSONParse(resp, { score: 5, feedback: "Dziękuję." });
-      eval.score = Math.min(10, Math.max(0, eval.score));
-      return eval;
+      const evalResult = safeJSONParse(resp, { score: 5, feedback: "Dziękuję." });
+      evalResult.score = Math.min(10, Math.max(0, evalResult.score));
+      return evalResult;
     } catch { return { score: 5, feedback: "Dziękuję za odpowiedź." }; }
   }
 }
