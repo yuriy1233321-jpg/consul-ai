@@ -6,26 +6,34 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// токен
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
+// авто logout
 api.interceptors.response.use(
-  response => response,
-  error => {
-    if (error.response?.status === 401) {
+  res => res,
+  err => {
+    if (err.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/';
     }
-    return Promise.reject(error);
+    return Promise.reject(err);
   }
 );
 
-export const register = (email, password, name) => api.post('/api/register', { email, password, name });
-export const login = (email, password) => api.post('/api/login', { email, password });
-export const sendMessage = (message) => api.post('/chat', { message });
+// 🔥 ОЦЕ ГОЛОВНЕ (експорти)
+export const register = (email, password, name) =>
+  api.post('/api/register', { email, password, name });
+
+export const login = (email, password) =>
+  api.post('/api/login', { email, password });
+
+export const sendMessage = (message) =>
+  api.post('/chat', { message });
 
 export default api;
