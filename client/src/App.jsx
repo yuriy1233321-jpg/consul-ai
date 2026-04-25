@@ -20,16 +20,33 @@ function App() {
   const [progress, setProgress] = useState(0);
   const messagesEndRef = useRef(null);
 
+  // Paywall modal state
+  const [paywallVisible, setPaywallVisible] = useState(false);
+  const [paywallMessage, setPaywallMessage] = useState('');
+  const [paywallPlans, setPaywallPlans] = useState([]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
-  console.log("AUTH:", isAuthenticated);
-  if (isAuthenticated) {
-    startInterview().catch(err => console.error(err));
-  }
-}, [isAuthenticated]);
+    console.log("AUTH:", isAuthenticated);
+    if (isAuthenticated) {
+      startInterview().catch(err => console.error(err));
+    }
+  }, [isAuthenticated]);
+
+  // Listen for paywall events from api interceptor
+  useEffect(() => {
+    const handlePaywall = (event) => {
+      const { type, message, plans } = event.detail;
+      setPaywallMessage(message || (type === 'expired' ? 'Twoja subskrypcja wygasła.' : 'Koniec wersji demo.'));
+      setPaywallPlans(plans || []);
+      setPaywallVisible(true);
+    };
+    window.addEventListener('show-paywall', handlePaywall);
+    return () => window.removeEventListener('show-paywall', handlePaywall);
+  }, []);
 
   const startInterview = async () => {
     try {
@@ -103,6 +120,13 @@ function App() {
     try {
       const res = await sendMessage(userMsg);
       const data = res.data;
+      // Handle paywall/expired responses (should be caught by interceptor, but double-check)
+      if (data.type === 'paywall' || data.type === 'expired') {
+        setPaywallMessage(data.message || (data.type === 'expired' ? 'Subskrypcja wygasła.' : 'Limit demo osiągnięty.'));
+        setPaywallPlans(data.plans || []);
+        setPaywallVisible(true);
+        return;
+      }
       if (data.type === 'question') {
         setMessages(prev => [...prev, {
           role: 'consul',
@@ -136,7 +160,10 @@ function App() {
         }]);
       }
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'system', text: '❌ Błąd połączenia. Spróbuj ponownie.' }]);
+      // Если ошибка уже обработана в interceptor (например, 401), не показываем дополнительное сообщение
+      if (!err.handled) {
+        setMessages(prev => [...prev, { role: 'system', text: '❌ Błąd połączenia. Spróbuj ponownie.' }]);
+      }
     } finally {
       setLoading(false);
     }
@@ -149,31 +176,82 @@ function App() {
     }
   };
 
-  if (!isAuthenticated) {
+  // Modal component for paywall
+  const PaywallModal = () => {
+    if (!paywallVisible) return null;
     return (
-      <div style={{ maxWidth: '500px', margin: '50px auto', padding: '20px', fontFamily: 'system-ui' }}>
-        <div style={{ background: 'linear-gradient(135deg, #dc143c, #8b0000)', color: 'white', padding: '16px', borderRadius: '16px', textAlign: 'center', marginBottom: '24px' }}>
-          <h1 style={{ margin: 0 }}>🎯 CONSUL.AI</h1>
-          <p style={{ margin: '5px 0 0', opacity: 0.9 }}>Zaloguj się, aby kontynuować</p>
-        </div>
-        <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-            <button onClick={() => setAuthMode('login')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '24px', background: authMode === 'login' ? '#dc143c' : '#f0f0f0', color: authMode === 'login' ? 'white' : '#333', cursor: 'pointer' }}>Zaloguj się</button>
-            <button onClick={() => setAuthMode('register')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '24px', background: authMode === 'register' ? '#dc143c' : '#f0f0f0', color: authMode === 'register' ? 'white' : '#333', cursor: 'pointer' }}>Zarejestruj się</button>
-          </div>
-          <form onSubmit={authMode === 'login' ? handleLogin : handleRegister}>
-            {authMode === 'register' && (
-              <input type="text" placeholder="Imię i nazwisko" value={name} onChange={e => setName(e.target.value)} required style={{ width: '100%', padding: '12px', marginBottom: '12px', border: '1px solid #ddd', borderRadius: '24px', boxSizing: 'border-box' }} />
-            )}
-            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={{ width: '100%', padding: '12px', marginBottom: '12px', border: '1px solid #ddd', borderRadius: '24px', boxSizing: 'border-box' }} />
-            <input type="password" placeholder="Hasło" value={password} onChange={e => setPassword(e.target.value)} required style={{ width: '100%', padding: '12px', marginBottom: '12px', border: '1px solid #ddd', borderRadius: '24px', boxSizing: 'border-box' }} />
-            <button type="submit" style={{ width: '100%', background: '#dc143c', color: 'white', border: 'none', padding: '12px', borderRadius: '24px', fontSize: '16px', cursor: 'pointer' }}>
-              {authMode === 'login' ? 'Zaloguj się' : 'Zarejestruj się'}
-            </button>
-          </form>
-          {authError && <div style={{ color: 'red', marginTop: '12px', textAlign: 'center' }}>{authError}</div>}
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000
+      }}>
+        <div style={{
+          background: 'white', borderRadius: '24px', maxWidth: '500px', width: '90%',
+          padding: '24px', textAlign: 'center', boxShadow: '0 20px 35px rgba(0,0,0,0.2)'
+        }}>
+          <h2 style={{ color: '#dc143c', marginTop: 0 }}>🔒 Dostęp ograniczony</h2>
+          <p style={{ fontSize: '16px', marginBottom: '20px' }}>{paywallMessage}</p>
+          {paywallPlans.length > 0 && (
+            <div style={{ marginBottom: '24px' }}>
+              <p style={{ fontWeight: 'bold' }}>Wybierz plan:</p>
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                {paywallPlans.map((plan, idx) => (
+                  <li key={idx} style={{ margin: '8px 0' }}>
+                    <a
+                      href={plan.link || 'https://flexiway.pl/cennik/'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#dc143c', textDecoration: 'none', fontWeight: 'bold' }}
+                    >
+                      {plan.name || `Plan ${plan.price}`} → {plan.price ? `${plan.price} zł` : ''}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <button
+            onClick={() => setPaywallVisible(false)}
+            style={{
+              background: '#dc143c', color: 'white', border: 'none',
+              padding: '10px 20px', borderRadius: '40px', cursor: 'pointer'
+            }}
+          >
+            Zamknij
+          </button>
         </div>
       </div>
+    );
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <div style={{ maxWidth: '500px', margin: '50px auto', padding: '20px', fontFamily: 'system-ui' }}>
+          <div style={{ background: 'linear-gradient(135deg, #dc143c, #8b0000)', color: 'white', padding: '16px', borderRadius: '16px', textAlign: 'center', marginBottom: '24px' }}>
+            <h1 style={{ margin: 0 }}>🎯 CONSUL.AI</h1>
+            <p style={{ margin: '5px 0 0', opacity: 0.9 }}>Zaloguj się, aby kontynuować</p>
+          </div>
+          <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+              <button onClick={() => setAuthMode('login')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '24px', background: authMode === 'login' ? '#dc143c' : '#f0f0f0', color: authMode === 'login' ? 'white' : '#333', cursor: 'pointer' }}>Zaloguj się</button>
+              <button onClick={() => setAuthMode('register')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '24px', background: authMode === 'register' ? '#dc143c' : '#f0f0f0', color: authMode === 'register' ? 'white' : '#333', cursor: 'pointer' }}>Zarejestruj się</button>
+            </div>
+            <form onSubmit={authMode === 'login' ? handleLogin : handleRegister}>
+              {authMode === 'register' && (
+                <input type="text" placeholder="Imię i nazwisko" value={name} onChange={e => setName(e.target.value)} required style={{ width: '100%', padding: '12px', marginBottom: '12px', border: '1px solid #ddd', borderRadius: '24px', boxSizing: 'border-box' }} />
+              )}
+              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={{ width: '100%', padding: '12px', marginBottom: '12px', border: '1px solid #ddd', borderRadius: '24px', boxSizing: 'border-box' }} />
+              <input type="password" placeholder="Hasło" value={password} onChange={e => setPassword(e.target.value)} required style={{ width: '100%', padding: '12px', marginBottom: '12px', border: '1px solid #ddd', borderRadius: '24px', boxSizing: 'border-box' }} />
+              <button type="submit" style={{ width: '100%', background: '#dc143c', color: 'white', border: 'none', padding: '12px', borderRadius: '24px', fontSize: '16px', cursor: 'pointer' }}>
+                {authMode === 'login' ? 'Zaloguj się' : 'Zarejestruj się'}
+              </button>
+            </form>
+            {authError && <div style={{ color: 'red', marginTop: '12px', textAlign: 'center' }}>{authError}</div>}
+          </div>
+        </div>
+        <PaywallModal />
+      </>
     );
   }
 
@@ -262,6 +340,7 @@ function App() {
         </button>
       </div>
       <div style={{ fontSize: '11px', textAlign: 'center', marginTop: '10px', color: '#888' }}>Shift+Enter = nowa linia</div>
+      <PaywallModal />
     </div>
   );
 }
