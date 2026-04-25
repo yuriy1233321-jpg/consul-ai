@@ -321,19 +321,19 @@ app.get("/api/admin/stats", (req, res) => {
 });
 
 // =====================
-// 🌐 FRONTEND (ВАЖЛИВО)
+// 🌐 FRONTEND (FIXED)
 // =====================
-app.use(express.static("client/dist"));
+const __dirname = new URL('.', import.meta.url).pathname;
 
+// віддаємо assets
+app.use("/assets", express.static(path.join(__dirname, "client/dist/assets")));
+
+// віддаємо весь dist
+app.use(express.static(path.join(__dirname, "client/dist")));
+
+// SPA fallback
 app.get("*", (req, res) => {
   if (!req.path.startsWith("/api")) {
-    res.sendFile(path.resolve("client/dist/index.html"));
+    res.sendFile(path.join(__dirname, "client/dist/index.html"));
   }
-});
-
-// =====================
-// 🚀 START SERVER
-// =====================
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
 });
