@@ -180,8 +180,7 @@ async function getNextQuestion(userId, session) {
         avgScore > 8 ? "hard" :
         avgScore > 6 ? "medium" : "easy";
 
-      const prompt = `
-Return ONLY valid JSON. No text.
+      const prompt = `Return ONLY valid JSON`;
 
 {
   "question": "...",
