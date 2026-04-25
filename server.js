@@ -14,6 +14,8 @@ import { body, validationResult } from "express-validator";
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 3000;
 
 // =====================
