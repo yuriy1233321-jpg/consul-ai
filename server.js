@@ -15,11 +15,10 @@ const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fet
 
 const app = express();
 app.set('trust proxy', 1);
-
 const PORT = process.env.PORT || 3000;
 
 // =====================
-// КОНФІГУРАЦІЯ
+// 🔐 КОНФІГУРАЦІЯ
 // =====================
 const CONFIG = {
   API_KEY: process.env.OPENAI_API_KEY,
@@ -41,15 +40,14 @@ if (!CONFIG.JWT_SECRET) {
 }
 
 // =====================
-// БЕЗПЕКА
+// 🛡️ БЕЗПЕКА
 // =====================
 app.use(helmet());
 app.use(cors({ origin: CONFIG.APP_URL, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
-// ❌ Видалено дублюючий static зверху – залишиться тільки в кінці
 
 // =====================
-// ДОПОМІЖНІ ФУНКЦІЇ
+// 🧰 ДОПОМІЖНІ ФУНКЦІЇ
 // =====================
 function detectGender(name) {
   if (!name) return "male";
@@ -71,7 +69,7 @@ function safeJSONParse(str, fallback = {}) {
 }
 
 // =====================
-// ФАЙЛОВІ СХОВИЩА (з атомарним записом)
+// 💾 ФАЙЛОВІ СХОВИЩА (атомарний запис + асинхронне збереження)
 // =====================
 class DataStore {
   constructor(file) { this.file = file; this.data = this.load(); }
@@ -81,10 +79,19 @@ class DataStore {
     fs.writeFileSync(tempFile, JSON.stringify(this.data, null, 2));
     fs.renameSync(tempFile, this.file);
   }
+  asyncSave() { setImmediate(() => this.save()); }
   findAll() { return this.data; }
   findOne(pred) { return this.data.find(pred); }
-  insert(item) { this.data.push(item); this.save(); return item; }
-  update(pred, updater) { const idx = this.data.findIndex(pred); if (idx !== -1) { this.data[idx] = updater(this.data[idx]); this.save(); return true; } return false; }
+  insert(item) { this.data.push(item); this.asyncSave(); return item; }
+  update(pred, updater) {
+    const idx = this.data.findIndex(pred);
+    if (idx !== -1) {
+      this.data[idx] = updater(this.data[idx]);
+      this.asyncSave();
+      return true;
+    }
+    return false;
+  }
 }
 
 const usersDB = new DataStore("users.json");
@@ -92,7 +99,7 @@ const resultsDB = new DataStore("results.json");
 const memoryStore = new DataStore("memory.json");
 
 // =====================
-// БАНК ПИТАНЬ
+// 📚 БАНК ПИТАНЬ
 // =====================
 let questionBank = [];
 try {
@@ -108,7 +115,7 @@ try {
 } catch(e) { console.error("Question bank error", e); }
 
 // =====================
-// НЕЧІТКИЙ SCORER
+// 🔍 НЕЧІТКИЙ SCORER
 // =====================
 class FuzzyScorer {
   calculateScore(answer, keywords) {
@@ -122,7 +129,7 @@ class FuzzyScorer {
 const fuzzyScorer = new FuzzyScorer();
 
 // =====================
-// ПАМ'ЯТЬ (з обмеженням розміру weakTopics)
+// 🧠 ПАМ'ЯТЬ (з обмеженням weakTopics)
 // =====================
 function getMemory(userId) {
   let mem = memoryStore.findOne(u => u.userId === userId);
@@ -138,7 +145,6 @@ function updateMemory(userId, topic, score) {
   if (mem.lastScores.length > 10) mem.lastScores.shift();
   if (score < 5) {
     mem.weakTopics[topic] = (mem.weakTopics[topic] || 0) + 1;
-    // Обмеження розміру weakTopics
     const entries = Object.entries(mem.weakTopics);
     if (entries.length > 20) {
       mem.weakTopics = Object.fromEntries(entries.slice(0, 10));
@@ -158,88 +164,46 @@ function getAverageScore(userId) {
 }
 
 // =====================
-// AI СЕРВІС (з retry, таймаутом, обробкою помилок)
+// 🤖 AI СЕРВІС (стабільний: повертає null замість throw)
 // =====================
 class AIService {
   async _callOnce(prompt) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CONFIG.OPENAI_TIMEOUT);
-
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${CONFIG.API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2
-      }),
-      signal: controller.signal
-    });
-
-    // ❗ HTTP помилка (401, 429, 500 і т.д.)
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("❌ OpenAI HTTP ERROR:", res.status, text);
-      throw new Error(`OpenAI HTTP ${res.status}`);
-    }
-
-    // ❗ JSON парсинг
-    let data;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONFIG.OPENAI_TIMEOUT);
     try {
-      data = await res.json();
-    } catch (e) {
-      console.error("❌ JSON parse error");
-      throw new Error("Invalid JSON from OpenAI");
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CONFIG.API_KEY}` },
+        body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.2 }),
+        signal: controller.signal
+      });
+      if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data?.choices?.[0]?.message?.content) throw new Error("Invalid OpenAI response");
+      return data.choices[0].message.content;
+    } catch (err) {
+      if (err.name === "AbortError") throw new Error("OpenAI timeout");
+      throw err;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    // ❗ структура відповіді
-    if (!data?.choices?.[0]?.message) {
-      console.error("❌ Bad OpenAI structure:", JSON.stringify(data).slice(0, 300));
-      throw new Error("Invalid OpenAI response structure");
-    }
-
-    const content = data.choices[0].message.content;
-
-    // ❗ пуста відповідь
-    if (!content || typeof content !== "string") {
-      throw new Error("Empty OpenAI response");
-    }
-
-    return content;
-
-  } catch (err) {
-    if (err.name === "AbortError") {
-      console.error("❌ OpenAI TIMEOUT");
-      throw new Error("OpenAI timeout");
-    }
-
-    console.error("❌ OpenAI FULL ERROR:", err.message);
-    throw err;
-
-  } finally {
-    clearTimeout(timeout);
   }
-}
 
   async call(prompt, retries = 2) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      return await this._callOnce(prompt);
-    } catch (err) {
-      if (i < retries) {
-        console.log(`🔁 Retry OpenAI ${i + 1}`);
-        await new Promise(r => setTimeout(r, 500));
-        continue;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        return await this._callOnce(prompt);
+      } catch (err) {
+        if (i < retries) {
+          console.log(`🔁 Retry OpenAI ${i + 1}`);
+          await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        console.error("❌ OpenAI FAILED:", err.message);
+        return null; // завжди null – стабільна поведінка
       }
-      console.error("❌ OpenAI failed after retries");
-      throw err;
     }
   }
-}
 
   async evaluateAnswer(question, answer, userId, session) {
     const keywords = session.currentQuestion?.answerKeywords || [];
@@ -303,22 +267,20 @@ Zwróć JSON:
 
     try {
       const resp = await this.call(prompt);
-
-if (!resp) {
-  throw new Error("Empty AI response");
-}
-
-const evalResult = safeJSONParse(resp, null);
-
-if (!evalResult) {
-  throw new Error("Invalid JSON");
-}
+      if (!resp) throw new Error("No AI response");
+      const evalResult = safeJSONParse(resp, null);
+      if (!evalResult) throw new Error("Invalid JSON");
       const scores = evalResult.scores;
       const total = scores ? Object.values(scores).reduce((a,b)=>a+b,0)/5 : evalResult.totalScore;
       evalResult.totalScore = Math.min(10, Math.max(0, Math.round(total)));
+
+      if (session.mode === "exam") {
+        evalResult.totalScore = Math.max(0, evalResult.totalScore - 1);
+        if (fuzzyResult && evalResult.totalScore > 7) evalResult.totalScore = 7;
+      }
       return evalResult;
     } catch (err) {
-      console.error('Evaluation error:', err);
+      console.error("Evaluation error:", err);
       if (fuzzyResult) return { totalScore: Math.min(fuzzyResult.score, 6), feedback: "Ocena automatyczna", strengths: [], weaknesses: [] };
       return { totalScore: 5, feedback: 'Dziękuję za odpowiedź.', strengths: [], weaknesses: [] };
     }
@@ -327,7 +289,7 @@ if (!evalResult) {
 const aiService = new AIService();
 
 // =====================
-// ДОПОМІЖНІ AI-ФУНКЦІЇ
+// 🧩 ДОПОМІЖНІ AI-ФУНКЦІЇ
 // =====================
 async function generateAIQuestion(topic, difficulty, userAvgScore) {
   const prompt = `
@@ -347,15 +309,13 @@ Zwróć JSON:
 `;
   try {
     const response = await aiService.call(prompt);
+    if (!response) return null;
     const parsed = safeJSONParse(response, null);
-    if (!parsed || !parsed.question) return null;
+    if (!parsed?.question) return null;
     if (parsed.question.length > 200) return null;
-    if (!parsed.keywords || parsed.keywords.length === 0) parsed.keywords = [topic];
+    if (!parsed.keywords?.length) parsed.keywords = [topic];
     return parsed;
-  } catch (e) {
-    console.log('AI generation failed', e);
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function generateFollowUpQuestion(originalQuestion, userAnswer, weaknesses) {
@@ -370,12 +330,13 @@ Zwróć JSON: { "question": "...", "hint": "..." }
 `;
   try {
     const resp = await aiService.call(prompt);
+    if (!resp) return null;
     return safeJSONParse(resp, null);
   } catch { return null; }
 }
 
 // =====================
-// РОЗУМНИЙ ВИБІР НАСТУПНОГО ПИТАННЯ
+// 🎯 РОЗУМНИЙ ВИБІР НАСТУПНОГО ПИТАННЯ
 // =====================
 async function getNextQuestion(userId, session) {
   const weakTopics = getWeakTopics(userId);
@@ -386,7 +347,10 @@ async function getNextQuestion(userId, session) {
   if (avgScore >= 8) difficulty = 'hard';
   else if (avgScore <= 5) difficulty = 'easy';
 
-  let targetTopic = weakTopics[0] || null;
+  let targetTopic = null;
+  if (weakTopics.length > 0 && Math.random() < 0.7) {
+    targetTopic = weakTopics[0];
+  }
   if (!targetTopic) {
     const allTopics = [...new Set(questionBank.map(q => q.topic))];
     const askedTopics = session.askedTopics || [];
@@ -417,7 +381,7 @@ async function getNextQuestion(userId, session) {
   const useAI = weakTopics.length > 0 && Math.random() < 0.3 && avgScore < 8;
   if (useAI && targetTopic) {
     const aiQuestion = await generateAIQuestion(targetTopic, difficulty, avgScore);
-    if (aiQuestion && aiQuestion.question) {
+    if (aiQuestion?.question) {
       aiQuestion.id = `ai_${Date.now()}`;
       aiQuestion.topic = targetTopic;
       aiQuestion.difficulty = difficulty;
@@ -430,7 +394,7 @@ async function getNextQuestion(userId, session) {
 }
 
 // =====================
-// СЕРТИФІКАТИ
+// 📜 СЕРТИФІКАТИ (підписані)
 // =====================
 function generateToken(userId, score, date) {
   const payload = `${userId}:${score}:${date}`;
@@ -448,7 +412,7 @@ function verifyToken(token) {
 }
 
 // =====================
-// КОНТРОЛЕР ІНТЕРВ'Ю
+// 🎮 КОНТРОЛЕР ІНТЕРВ'Ю (з гістерезисом, анти-спамом та асинхронним збереженням)
 // =====================
 class InterviewController {
   getSession(userId) {
@@ -459,7 +423,8 @@ class InterviewController {
   createSession(userId) {
     const session = {
       userId,
-      step: "ask_name",
+      mode: "learning",
+      step: "choose_mode",
       answers: [],
       answersDetails: [],
       askedTopics: [],
@@ -483,12 +448,25 @@ class InterviewController {
     if (session.finished) this.createSession(userId);
     session = this.getSession(userId);
 
+    // ---- Вибір режиму ----
+    if (session.step === "choose_mode") {
+      session.step = "choosing_mode";
+      return res.json({ type: "question", question: "Wybierz tryb: napisz 'nauka' lub 'egzamin'.", mode: session.mode });
+    }
+    if (session.step === "choosing_mode") {
+      const msg = (message || "").toLowerCase();
+      session.mode = msg.includes("egzamin") ? "exam" : "learning";
+      session.step = "ask_name";
+      return res.json({ type: "info", message: `Wybrano tryb: ${session.mode === "exam" ? "Egzamin (bez pomocy)" : "Nauka (z podpowiedziami)"}`, mode: session.mode });
+    }
+
+    // ---- Ім'я ----
     if (session.step === "ask_name") {
       session.step = "waiting_name";
-      return res.json({ type: "question", question: "Dzień dobry. Proszę podać swoje imię." });
+      return res.json({ type: "question", question: "Dzień dobry. Proszę podać swoje imię.", mode: session.mode });
     }
     if (session.step === "waiting_name") {
-      if (!message || message.trim().length < 2) return res.json({ type: "question", question: "Proszę podać poprawne imię." });
+      if (!message || message.trim().length < 2) return res.json({ type: "question", question: "Proszę podać poprawne imię.", mode: session.mode });
       session.name = message.trim();
       session.step = "ready";
       const first = questionBank[0];
@@ -497,152 +475,159 @@ class InterviewController {
       session.currentTopic = first.topic;
       session.askedTopics = session.askedTopics || [];
       session.askedTopics.push(first.topic);
-      return res.json({ type: "question", intro: first.intro || "Proszę odpowiedzieć.", question: first.question, hint: first.hint, index: 1, total: CONFIG.QUESTIONS_PER_SESSION, progress: 0 });
+      return res.json({
+        type: "question",
+        intro: first.intro || "Proszę odpowiedzieć.",
+        question: first.question,
+        hint: session.mode === "learning" ? first.hint : null,
+        index: 1,
+        total: CONFIG.QUESTIONS_PER_SESSION,
+        progress: 0,
+        mode: session.mode
+      });
     }
+
+    // ---- Головна логіка інтерв'ю ----
     if (session.step === "ready") {
-  try {
-    if (!message) {
-      return res.json({ type: "error", message: "No answer" });
-    }
+      try {
+        if (!message) return res.json({ type: "error", message: "No answer", mode: session.mode });
 
-    const evaluation = await aiService.evaluateAnswer(
-      session.currentQuestion.question,
-      message,
-      userId,
-      session
-    );
+        // Оцінка з fallback (якщо OpenAI впаде)
+        let evaluation;
+        try {
+          evaluation = await aiService.evaluateAnswer(session.currentQuestion.question, message, userId, session);
+        } catch (err) {
+          console.error("AI evaluation failed, using fuzzy fallback", err);
+          const keywords = session.currentQuestion?.answerKeywords || [];
+          const fuzzy = fuzzyScorer.calculateScore(message, keywords);
+          evaluation = {
+            totalScore: fuzzy.score,
+            feedback: "Ocena tymczasowa (AI niedostępne)",
+            strengths: [],
+            weaknesses: []
+          };
+        }
 
-    // FOLLOW-UP
-    if (evaluation.totalScore < 5 && (session.followUpCount || 0) < 2) {
-      session.followUpCount++;
+        // FOLLOW-UP (тільки для Learning, з анти-спамом)
+        if (
+          session.mode === "learning" &&
+          evaluation.totalScore < 5 &&
+          (session.followUpCount || 0) < 2 &&
+          message.trim().length > 5
+        ) {
+          session.followUpCount = (session.followUpCount || 0) + 1;
+          const followUp = await generateFollowUpQuestion(session.currentQuestion.question, message, evaluation.weaknesses);
+          if (followUp?.question) {
+            session.currentQuestion = {
+              id: `followup_${Date.now()}`,
+              topic: session.currentTopic,
+              question: followUp.question,
+              hint: followUp.hint || "",
+              intro: "Dopytam bardziej szczegółowo:",
+              answerKeywords: []
+            };
+            return res.json({
+              type: "question",
+              intro: session.currentQuestion.intro,
+              question: session.currentQuestion.question,
+              hint: session.currentQuestion.hint,
+              followUp: true,
+              mode: session.mode
+            });
+          }
+        }
 
-      const followUp = await generateFollowUpQuestion(
-        session.currentQuestion.question,
-        message,
-        evaluation.weaknesses
-      );
+        // Збереження відповіді
+        const score = evaluation.totalScore || 5;
+        session.answers.push(score);
+        session.questionIndex++;
+        session.progress = Math.round((session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100);
+        updateMemory(userId, session.currentTopic, score);
 
-      if (followUp && followUp.question) {
-        session.currentQuestion = {
-          id: `followup_${Date.now()}`,
-          topic: session.currentTopic,
-          question: followUp.question,
-          hint: followUp.hint || "",
-          intro: "Dopytam bardziej szczegółowo:",
-          answerKeywords: []
-        };
+        // Автоматичне перемикання режиму з гістерезисом
+        const newAvg = getAverageScore(userId);
+        if (session.mode !== "exam" && newAvg >= 8) {
+          session.mode = "exam";
+          console.log(`📈 User ${userId} promoted to EXAM mode (avg: ${newAvg})`);
+        } else if (session.mode !== "learning" && newAvg <= 5) {
+          session.mode = "learning";
+          console.log(`📉 User ${userId} demoted to LEARNING mode (avg: ${newAvg})`);
+        }
+
+        if (!session.answersDetails) session.answersDetails = [];
+        session.answersDetails.push({
+          question: session.currentQuestion.question,
+          answer: message,
+          score,
+          feedback: evaluation.feedback,
+          strengths: evaluation.strengths,
+          weaknesses: evaluation.weaknesses
+        });
+        if (session.answersDetails.length > 10) session.answersDetails.shift();
+
+        // Фінал
+        if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
+          const total = session.answers.reduce((a,b)=>a+b,0);
+          const avg = total / session.answers.length;
+          const weak = getWeakTopics(userId);
+          const final = {
+            type: "final",
+            mode: session.mode,
+            level: avg >= 8 ? "bardzo dobry" : avg >= 6 ? "dobry" : "dostateczny",
+            recommendation: avg >= 6 ? "ready" : "not_ready",
+            averageScore: avg.toFixed(1),
+            weakTopics: weak,
+            progress: 100
+          };
+          session.finished = true;
+          resultsDB.insert({ userId, answers: session.answers, finalReport: final, createdAt: new Date().toISOString() });
+          if (final.recommendation === "ready") {
+            const cert = { verificationUrl: `${CONFIG.APP_URL}/api/certificate/verify?token=${generateToken(userId, avg, Date.now())}` };
+            final.certificate = cert;
+          }
+          return res.json(final);
+        }
+
+        if (score >= 6) session.followUpCount = 0;
+
+        // Наступне питання
+        const nextQ = await getNextQuestion(userId, session);
+        session.currentQuestion = nextQ;
+        session.currentTopic = nextQ.topic;
+        session.askedQuestions.push(nextQ.id);
+        if (!session.askedTopics.includes(nextQ.topic)) session.askedTopics.push(nextQ.topic);
 
         return res.json({
-          type: "question",
-          intro: session.currentQuestion.intro,
-          question: session.currentQuestion.question,
-          hint: session.currentQuestion.hint,
-          followUp: true
+          type: "next_question",
+          evaluation: {
+            score,
+            feedback: session.mode === "learning" ? evaluation.feedback : "Odpowiedź przyjęta",
+            strengths: evaluation.strengths?.slice(0, 2),
+            weaknesses: evaluation.weaknesses?.slice(0, 2)
+          },
+          nextQuestion: {
+            intro: nextQ.intro || "Proszę odpowiedzieć.",
+            question: nextQ.question,
+            hint: session.mode === "learning" ? nextQ.hint : null,
+            index: session.questionIndex + 1
+          },
+          progress: session.progress,
+          current: session.questionIndex,
+          total: CONFIG.QUESTIONS_PER_SESSION,
+          mode: session.mode
         });
+      } catch (err) {
+        console.error("🔥 CRITICAL ERROR:", err);
+        return res.json({ type: "error", message: "Temporary issue, try again", mode: session.mode });
       }
     }
-
-    // ✅ ЗБЕРЕЖЕННЯ
-    const score = evaluation.totalScore || 5;
-
-    session.answers.push(score);
-    session.questionIndex++;
-
-    session.progress = Math.round(
-      (session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100
-    );
-
-    updateMemory(userId, session.currentTopic, score);
-
-    // answersDetails
-    if (!session.answersDetails) session.answersDetails = [];
-    session.answersDetails.push({
-      question: session.currentQuestion.question,
-      answer: message,
-      score,
-      feedback: evaluation.feedback,
-      strengths: evaluation.strengths,
-      weaknesses: evaluation.weaknesses
-    });
-
-    if (session.answersDetails.length > 10) {
-      session.answersDetails.shift();
-    }
-
-    // ✅ ФІНАЛ
-    if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
-      const total = session.answers.reduce((a, b) => a + b, 0);
-      const avg = total / session.answers.length;
-
-      const final = {
-        type: "final",
-        level:
-          avg >= 8 ? "bardzo dobry" :
-          avg >= 6 ? "dobry" : "dostateczny",
-        recommendation: avg >= 6 ? "ready" : "not_ready",
-        averageScore: avg.toFixed(1),
-        progress: 100
-      };
-
-      session.finished = true;
-
-      return res.json(final);
-    }
-
-    // reset follow-up
-    if (score >= 6) {
-      session.followUpCount = 0;
-    }
-
-    // NEXT QUESTION
-    const nextQ = await getNextQuestion(userId, session);
-
-    session.currentQuestion = nextQ;
-    session.currentTopic = nextQ.topic;
-    session.askedQuestions.push(nextQ.id);
-
-    if (!session.askedTopics.includes(nextQ.topic)) {
-      session.askedTopics.push(nextQ.topic);
-    }
-
-    return res.json({
-      type: "next_question",
-      evaluation: {
-        score,
-        feedback: evaluation.feedback || "OK",
-        strengths: evaluation.strengths?.slice(0, 2),
-        weaknesses: evaluation.weaknesses?.slice(0, 2)
-      },
-      nextQuestion: {
-        intro: nextQ.intro || "Proszę odpowiedzieć.",
-        question: nextQ.question,
-        hint: nextQ.hint,
-        index: session.questionIndex + 1
-      },
-      progress: session.progress,
-      current: session.questionIndex,
-      total: CONFIG.QUESTIONS_PER_SESSION
-    });
-
-  } catch (err) {
-    console.error("🔥 CRITICAL ERROR:", err);
-
-    // ❗ НІКОЛИ не падаємо
-    return res.json({
-      type: "error",
-      message: "Temporary issue, try again"
-    });
-  }
-}
-
-// ✅ ВАЖЛИВО — ЦЕ МАЄ БУТИ В КІНЦІ МЕТОДУ
-return res.json({ type: "error", message: "Unknown step" });
+    return res.json({ type: "error", message: "Unknown step", mode: session.mode });
   }
 }
 const interviewController = new InterviewController();
 
 // =====================
-// АВТЕНТИФІКАЦІЯ ТА МАРШРУТИ
+// 🔑 АВТЕНТИФІКАЦІЯ ТА МАРШРУТИ
 // =====================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -709,7 +694,7 @@ app.get("/api/admin/stats", (req, res) => {
 });
 
 // =====================
-// ФРОНТЕНД
+// 🌐 ФРОНТЕНД
 // =====================
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
@@ -724,6 +709,6 @@ app.get("*", (req, res) => {
 });
 
 // =====================
-// ЗАПУСК
+// 🚀 ЗАПУСК
 // =====================
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
