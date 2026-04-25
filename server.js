@@ -181,18 +181,18 @@ async function getNextQuestion(userId, session) {
         avgScore > 6 ? "medium" : "easy";
 
       const prompt = `
-Zadaj pytanie do rozmowy o Kartę Polaka.
+const prompt = `
+Return ONLY valid JSON. No text.
 
-Temat: ${preferredTopic || "ogólny"}
-Poziom: ${difficulty}
-
-Zwróć JSON:
 {
   "question": "...",
   "keywords": ["...", "..."],
   "hint": "...",
   "intro": "..."
 }
+
+Topic: ${preferredTopic || "general"}
+Difficulty: ${difficulty}
 `;
 
       const response = await aiService.call(prompt);
@@ -216,7 +216,8 @@ Zwróć JSON:
 
   // 📦 STATIC
   // ❌ виключаємо вже використані теми
-const unused = questionBank.filter(q => !session.askedQuestions.includes(q.id));
+const used = session.askedQuestions || [];
+const unused = questionBank.filter(q => !used.includes(q.id));
 
 // якщо всі теми вже були — ресет
 const pool = unused.length > 0 ? unused : questionBank;
@@ -228,7 +229,9 @@ const filtered = preferredTopic
 
 // якщо після фільтра нічого — беремо pool
 const finalPool = filtered.length > 0 ? filtered : pool;
-
+if (finalPool.length === 0) {
+  return questionBank[Math.floor(Math.random() * questionBank.length)];
+}
 // випадкове питання
 return finalPool[Math.floor(Math.random() * finalPool.length)];
 }
@@ -250,51 +253,7 @@ function verifyToken(token) {
   const [userId, score, date] = payload.split(":");
   return { userId, score: parseFloat(score), date: parseInt(date) };
 }
-async function getNextQuestion(userId, session) {
-  const used = new Set(session.askedQuestions || []);
-  const weakTopics = getWeakTopics(userId);
 
-  // 1. Фільтр: прибираємо використані питання
-  let available = questionBank.filter(q => !used.has(q.id));
-
-  // fallback якщо все використано
-  if (available.length === 0) {
-    session.askedQuestions = [];
-    available = [...questionBank];
-  }
-
-  // 2. Пріоритет слабких тем
-  let prioritized = [];
-
-  if (weakTopics.length > 0) {
-    prioritized = available.filter(q => weakTopics.includes(q.topic));
-  }
-
-  // якщо нема слабких тем → беремо всі
-  if (prioritized.length === 0) {
-    prioritized = available;
-  }
-
-  // 3. Баланс складності
-  const progress = session.questionIndex / CONFIG.QUESTIONS_PER_SESSION;
-
-  let difficulty;
-
-  if (progress < 0.3) difficulty = "easy";
-  else if (progress < 0.7) difficulty = "medium";
-  else difficulty = "hard";
-
-  let filteredByDifficulty = prioritized.filter(q => q.difficulty === difficulty);
-
-  if (filteredByDifficulty.length === 0) {
-    filteredByDifficulty = prioritized;
-  }
-
-  // 4. Рандом (але контрольований)
-  const next = filteredByDifficulty[Math.floor(Math.random() * filteredByDifficulty.length)];
-
-  return next;
-}
 // =====================
 // КОНТРОЛЕР ІНТЕРВ'Ю
 // =====================
