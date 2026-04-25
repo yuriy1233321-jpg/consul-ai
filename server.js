@@ -533,11 +533,12 @@ class InterviewController {
       }
     }
 
-    // ✅ ЗБЕРЕЖЕННЯ (ПЕРЕНЕСЕНО ВСЕРЕДИНУ try)
+    // ✅ ЗБЕРЕЖЕННЯ
     const score = evaluation.totalScore || 5;
 
     session.answers.push(score);
     session.questionIndex++;
+
     session.progress = Math.round(
       (session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100
     );
@@ -554,16 +555,21 @@ class InterviewController {
       strengths: evaluation.strengths,
       weaknesses: evaluation.weaknesses
     });
-    if (session.answersDetails.length > 10) session.answersDetails.shift();
 
-    // ✅ ЗАВЕРШЕННЯ
+    if (session.answersDetails.length > 10) {
+      session.answersDetails.shift();
+    }
+
+    // ✅ ФІНАЛ
     if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
       const total = session.answers.reduce((a, b) => a + b, 0);
       const avg = total / session.answers.length;
 
       const final = {
         type: "final",
-        level: avg >= 8 ? "bardzo dobry" : avg >= 6 ? "dobry" : "dostateczny",
+        level:
+          avg >= 8 ? "bardzo dobry" :
+          avg >= 6 ? "dobry" : "dostateczny",
         recommendation: avg >= 6 ? "ready" : "not_ready",
         averageScore: avg.toFixed(1),
         progress: 100
@@ -575,33 +581,44 @@ class InterviewController {
     }
 
     // reset follow-up
-    if (score >= 6) session.followUpCount = 0;
+    if (score >= 6) {
+      session.followUpCount = 0;
+    }
 
-    // наступне питання
+    // NEXT QUESTION
     const nextQ = await getNextQuestion(userId, session);
 
     session.currentQuestion = nextQ;
     session.currentTopic = nextQ.topic;
     session.askedQuestions.push(nextQ.id);
 
+    if (!session.askedTopics.includes(nextQ.topic)) {
+      session.askedTopics.push(nextQ.topic);
+    }
+
     return res.json({
       type: "next_question",
       evaluation: {
         score,
-        feedback: evaluation.feedback || "OK"
+        feedback: evaluation.feedback || "OK",
+        strengths: evaluation.strengths?.slice(0, 2),
+        weaknesses: evaluation.weaknesses?.slice(0, 2)
       },
       nextQuestion: {
+        intro: nextQ.intro || "Proszę odpowiedzieć.",
         question: nextQ.question,
         hint: nextQ.hint,
-        intro: nextQ.intro
+        index: session.questionIndex + 1
       },
-      progress: session.progress
+      progress: session.progress,
+      current: session.questionIndex,
+      total: CONFIG.QUESTIONS_PER_SESSION
     });
 
   } catch (err) {
     console.error("🔥 CRITICAL ERROR:", err);
 
-    // ❗ НІКОЛИ не даємо 502
+    // ❗ НІКОЛИ не падаємо
     return res.json({
       type: "error",
       message: "Temporary issue, try again"
@@ -609,66 +626,8 @@ class InterviewController {
   }
 }
 
-      // Збереження відповіді
-      session.answers.push(evaluation.totalScore);
-      session.questionIndex++;
-      session.progress = Math.round((session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100);
-      updateMemory(userId, session.currentTopic, evaluation.totalScore);
-
-      if (!session.answersDetails) session.answersDetails = [];
-      session.answersDetails.push({
-        question: session.currentQuestion.question,
-        answer: message,
-        score: evaluation.totalScore,
-        feedback: evaluation.feedback,
-        strengths: evaluation.strengths,
-        weaknesses: evaluation.weaknesses
-      });
-      if (session.answersDetails.length > 10) session.answersDetails.shift();
-
-      // Перевірка завершення
-      if (session.questionIndex >= CONFIG.QUESTIONS_PER_SESSION) {
-        const total = session.answers.reduce((a,b)=>a+b,0);
-        const avg = total / session.answers.length;
-        const weak = getWeakTopics(userId);
-        const final = { type: "final", level: avg>=8?"bardzo dobry":avg>=6?"dobry":"dostateczny", recommendation: avg>=6?"ready":"not_ready", averageScore: avg.toFixed(1), weakTopics: weak, progress: 100 };
-        session.finished = true;
-        resultsDB.insert({ userId, answers: session.answers, finalReport: final, createdAt: new Date().toISOString() });
-        if (final.recommendation === "ready") {
-          const cert = { verificationUrl: `${CONFIG.APP_URL}/api/certificate/verify?token=${generateToken(userId, avg, Date.now())}` };
-          final.certificate = cert;
-        }
-        return res.json(final);
-      }
-
-      if (evaluation.totalScore >= 6) session.followUpCount = 0;
-
-      const nextQ = await getNextQuestion(userId, session);
-      session.currentQuestion = nextQ;
-      session.currentTopic = nextQ.topic;
-      session.askedQuestions.push(nextQ.id);
-      if (!session.askedTopics.includes(nextQ.topic)) session.askedTopics.push(nextQ.topic);
-
-      return res.json({
-        type: "next_question",
-        evaluation: {
-          score: evaluation.totalScore,
-          feedback: evaluation.feedback,
-          strengths: evaluation.strengths?.slice(0,2),
-          weaknesses: evaluation.weaknesses?.slice(0,2)
-        },
-        nextQuestion: {
-          intro: nextQ.intro || "Proszę odpowiedzieć.",
-          question: nextQ.question,
-          hint: nextQ.hint,
-          index: session.questionIndex + 1
-        },
-        progress: session.progress,
-        current: session.questionIndex,
-        total: CONFIG.QUESTIONS_PER_SESSION
-      });
-    }
-    return res.json({ type: "error", message: "Unknown step" });
+// ✅ ВАЖЛИВО — ЦЕ МАЄ БУТИ В КІНЦІ МЕТОДУ
+return res.json({ type: "error", message: "Unknown step" });
   }
 }
 const interviewController = new InterviewController();
