@@ -1,9 +1,4 @@
 
 [
-  {
-    "id": "q1",
-    "topic": "polish",
-    "question": "Jakie są symbole Polski?",
-    "answerKeywords": ["orzeł", "flaga", "hymn"]
-  }
+  { "id": "1", "topic": "polish symbols", "question": "Jakie są symbole narodowe Polski?", "answerKeywords": ["orzeł","flaga","hymn"], "hint": "orzeł, flaga, hymn", "intro": "Symbole" }
 ]
