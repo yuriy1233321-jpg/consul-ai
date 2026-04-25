@@ -1,4 +1,444 @@
 
 [
-  { "id": "1", "topic": "polish symbols", "question": "Jakie są symbole narodowe Polski?", "answerKeywords": ["orzeł","flaga","hymn"], "hint": "orzeł, flaga, hymn", "intro": "Symbole" }
+  {
+    "id": "sym_001",
+    "topic": "polish symbols",
+    "difficulty": "easy",
+    "question": "Jakie są trzy polskie symbole narodowe?",
+    "answerKeywords": ["orzeł", "flaga", "hymn"],
+    "hint": "Orzeł biały, flaga, hymn państwowy",
+    "intro": "Symbole narodowe są ważne dla każdego kraju."
+  },
+  {
+    "id": "sym_002",
+    "topic": "polish symbols",
+    "difficulty": "easy",
+    "question": "Jakiego koloru jest orzeł w polskim godle?",
+    "answerKeywords": ["biały", "białego"],
+    "hint": "Orzeł biały na czerwonym tle",
+    "intro": "Godło Polski przedstawia orła."
+  },
+  {
+    "id": "sym_003",
+    "topic": "polish symbols",
+    "difficulty": "easy",
+    "question": "Jakie kolory ma flaga Polski?",
+    "answerKeywords": ["biały", "czerwony", "biało-czerwony"],
+    "hint": "Dwa poziome pasy: biały i czerwony",
+    "intro": "Flaga to jeden z symboli narodowych."
+  },
+  {
+    "id": "sym_004",
+    "topic": "polish symbols",
+    "difficulty": "medium",
+    "question": "Kto jest autorem słów polskiego hymnu?",
+    "answerKeywords": ["wybicki", "józef wybicki"],
+    "hint": "Józef Wybicki napisał 'Mazurek Dąbrowskiego'",
+    "intro": "Hymn narodowy ma autora."
+  },
+  {
+    "id": "sym_005",
+    "topic": "polish symbols",
+    "difficulty": "medium",
+    "question": "Co symbolizuje biały orzeł w godle Polski?",
+    "answerKeywords": ["duma", "niepodległość", "siła", "godność"],
+    "hint": "Wartości narodowe: duma, niepodległość",
+    "intro": "Symbole mają znaczenie."
+  },
+  {
+    "id": "sym_006",
+    "topic": "polish symbols",
+    "difficulty": "hard",
+    "question": "Skąd pochodzi legenda o białym orle?",
+    "answerKeywords": ["lech", "gniezno", "piast", "orzeł biały"],
+    "hint": "Legenda o Lechu, Czechu i Rusie",
+    "intro": "Początki polskiej państwowości."
+  },
+
+  {
+    "id": "his_001",
+    "topic": "polish history",
+    "difficulty": "easy",
+    "question": "Kto był pierwszym królem Polski?",
+    "answerKeywords": ["bolesław chrobry", "chrobry"],
+    "hint": "Bolesław Chrobry, koronacja 1025 roku",
+    "intro": "Początki monarchii w Polsce."
+  },
+  {
+    "id": "his_002",
+    "topic": "polish history",
+    "difficulty": "easy",
+    "question": "W którym roku Polska przyjęła chrzest?",
+    "answerKeywords": ["966"],
+    "hint": "Rok 966 – chrzest Mieszka I",
+    "intro": "Ważna data w historii Polski."
+  },
+  {
+    "id": "his_003",
+    "topic": "polish history",
+    "difficulty": "medium",
+    "question": "Kto był przywódcą powstania styczniowego?",
+    "answerKeywords": ["traugutt", "romuald traugutt"],
+    "hint": "Romuald Traugutt – dyktator powstania",
+    "intro": "Powstanie styczniowe (1863–1864)."
+  },
+  {
+    "id": "his_004",
+    "topic": "polish history",
+    "difficulty": "medium",
+    "question": "Co wydarzyło się w Polsce w 1989 roku?",
+    "answerKeywords": ["okrągły stół", "wybory", "transformacja", "solidarność"],
+    "hint": "Upadek komunizmu, częściowo wolne wybory",
+    "intro": "Przełom polityczny."
+  },
+  {
+    "id": "his_005",
+    "topic": "polish history",
+    "difficulty": "easy",
+    "question": "Kto był papieżem pochodzącym z Polski?",
+    "answerKeywords": ["jan paweł ii", "karol wojtyła"],
+    "hint": "Jan Paweł II, Karol Wojtyła",
+    "intro": "Polski papież."
+  },
+  {
+    "id": "his_006",
+    "topic": "polish history",
+    "difficulty": "hard",
+    "question": "Która polska królowa rządziła w XVI wieku?",
+    "answerKeywords": ["bona sforza", "królowa bona"],
+    "hint": "Bona Sforza – żona Zygmunta I Starego",
+    "intro": "Wpływowa królowa."
+  },
+  {
+    "id": "his_007",
+    "topic": "polish history",
+    "difficulty": "medium",
+    "question": "Kto wygrał bitwę pod Grunwaldem?",
+    "answerKeywords": ["polska", "litwa", "władysław jagiełło", "jagiełło"],
+    "hint": "Polska i Litwa pod wodzą Jagiełły",
+    "intro": "Bitwa z Krzyżakami (1410)."
+  },
+  {
+    "id": "his_008",
+    "topic": "polish history",
+    "difficulty": "easy",
+    "question": "Kiedy Polska wstąpiła do Unii Europejskiej?",
+    "answerKeywords": ["2004"],
+    "hint": "Rok 2004",
+    "intro": "Akcesja do UE."
+  },
+  {
+    "id": "his_009",
+    "topic": "polish history",
+    "difficulty": "medium",
+    "question": "Kim był Jan III Sobieski?",
+    "answerKeywords": ["król", "zwycięzca spod wiednia", "wódz"],
+    "hint": "Król Polski, odsiecz wiedeńska 1683",
+    "intro": "Wybitny władca."
+  },
+  {
+    "id": "his_010",
+    "topic": "polish history",
+    "difficulty": "hard",
+    "question": "Co to była 'Solidarność'?",
+    "answerKeywords": ["związek zawodowy", "ruch społeczny", "opozycja", "lecha wałęsy"],
+    "hint": "Niezależny związek zawodowy, ruch opozycyjny",
+    "intro": "Ruch społeczny z lat 80."
+  },
+
+  {
+    "id": "geo_001",
+    "topic": "polish geography",
+    "difficulty": "easy",
+    "question": "Jaka rzeka jest najdłuższa w Polsce?",
+    "answerKeywords": ["wisła"],
+    "hint": "Wisła – 1047 km",
+    "intro": "Najdłuższa rzeka."
+  },
+  {
+    "id": "geo_002",
+    "topic": "polish geography",
+    "difficulty": "easy",
+    "question": "Jakie morze znajduje się przy północnej granicy Polski?",
+    "answerKeywords": ["bałtyk", "morze bałtyckie"],
+    "hint": "Morze Bałtyckie",
+    "intro": "Północna granica Polski."
+  },
+  {
+    "id": "geo_003",
+    "topic": "polish geography",
+    "difficulty": "medium",
+    "question": "Jakie pasma górskie znajdują się w Polsce?",
+    "answerKeywords": ["tatry", "karpaty", "sudety", "beskidy", "bieszczady"],
+    "hint": "Karpaty (Tatry, Beskidy, Bieszczady) i Sudety",
+    "intro": "Góry w południowej Polsce."
+  },
+  {
+    "id": "geo_004",
+    "topic": "polish geography",
+    "difficulty": "easy",
+    "question": "Jaka jest stolica Polski?",
+    "answerKeywords": ["warszawa"],
+    "hint": "Warszawa",
+    "intro": "Stolica nad Wisłą."
+  },
+  {
+    "id": "geo_005",
+    "topic": "polish geography",
+    "difficulty": "medium",
+    "question": "Które jezioro jest największe w Polsce?",
+    "answerKeywords": ["śniardwy"],
+    "hint": "Śniardwy na Mazurach",
+    "intro": "Największe jezioro."
+  },
+  {
+    "id": "geo_006",
+    "topic": "polish geography",
+    "difficulty": "hard",
+    "question": "Jaki jest najwyższy szczyt Polski?",
+    "answerKeywords": ["rysy"],
+    "hint": "Rysy w Tatrach (2499 m n.p.m.)",
+    "intro": "Najwyższy szczyt."
+  },
+
+  {
+    "id": "tra_001",
+    "topic": "polish traditions",
+    "difficulty": "easy",
+    "question": "Kiedy Polacy obchodzą Wigilię?",
+    "answerKeywords": ["24 grudnia", "wigilia"],
+    "hint": "24 grudnia, dzień przed Bożym Narodzeniem",
+    "intro": "Tradycja wigilijna."
+  },
+  {
+    "id": "tra_002",
+    "topic": "polish traditions",
+    "difficulty": "easy",
+    "question": "Ile potraw jest na tradycyjnej wigilii?",
+    "answerKeywords": ["12", "dwanaście"],
+    "hint": "12 potraw",
+    "intro": "Zwyczaj wigilijny."
+  },
+  {
+    "id": "tra_003",
+    "topic": "polish traditions",
+    "difficulty": "medium",
+    "question": "Co oznacza dzielenie się opłatkiem?",
+    "answerKeywords": ["przebaczenie", "pojednanie", "życzenia", "rodzina"],
+    "hint": "Symbol pojednania i życzeń",
+    "intro": "Wigilijny zwyczaj."
+  },
+  {
+    "id": "tra_004",
+    "topic": "polish traditions",
+    "difficulty": "easy",
+    "question": "Kiedy jest lany poniedziałek?",
+    "answerKeywords": ["poniedziałek wielkanocny", "śmigus dyngus"],
+    "hint": "Poniedziałek po Wielkanocy",
+    "intro": "Tradycja śmigusa-dyngusa."
+  },
+  {
+    "id": "tra_005",
+    "topic": "polish traditions",
+    "difficulty": "medium",
+    "question": "Co wkłada się do koszyczka wielkanocnego?",
+    "answerKeywords": ["jajka", "kiełbasa", "chleb", "sól", "baranek"],
+    "hint": "Jajka, kiełbasa, chleb, sól, baranek z cukru",
+    "intro": "Święconka."
+  },
+  {
+    "id": "tra_006",
+    "topic": "polish traditions",
+    "difficulty": "hard",
+    "question": "Skąd pochodzi tradycja andrzejek?",
+    "answerKeywords": ["wróżby", "św andrzej", "katarzynki"],
+    "hint": "Wróżby w noc św. Andrzeja",
+    "intro": "Andrzejki – tradycja wróżb."
+  },
+
+  {
+    "id": "lit_001",
+    "topic": "polish literature",
+    "difficulty": "easy",
+    "question": "Kto napisał 'Pana Tadeusza'?",
+    "answerKeywords": ["adam mickiewicz", "mickiewicz"],
+    "hint": "Adam Mickiewicz",
+    "intro": "Epopeja narodowa."
+  },
+  {
+    "id": "lit_002",
+    "topic": "polish literature",
+    "difficulty": "easy",
+    "question": "Kto jest autorem 'Quo Vadis'?",
+    "answerKeywords": ["henryk sienkiewicz", "sienkiewicz"],
+    "hint": "Henryk Sienkiewicz, laureat Nobla",
+    "intro": "Powieść historyczna."
+  },
+  {
+    "id": "lit_003",
+    "topic": "polish literature",
+    "difficulty": "medium",
+    "question": "Kto napisał 'Dziady'?",
+    "answerKeywords": ["adam mickiewicz", "mickiewicz"],
+    "hint": "Adam Mickiewicz, dramat romantyczny",
+    "intro": "Dramat romantyczny."
+  },
+  {
+    "id": "lit_004",
+    "topic": "polish literature",
+    "difficulty": "easy",
+    "question": "Kto dostał literacką Nagrodę Nobla jako Polak?",
+    "answerKeywords": ["sienkiewicz", "reymont", "miłosz", "szymborska"],
+    "hint": "Sienkiewicz, Reymont, Miłosz, Szymborska",
+    "intro": "Polscy nobliści."
+  },
+  {
+    "id": "lit_005",
+    "topic": "polish literature",
+    "difficulty": "hard",
+    "question": "Kim był Jan Kochanowski?",
+    "answerKeywords": ["poeta", "renesans", "ojciec poezji polskiej", "treny"],
+    "hint": "Poeta renesansowy, autor 'Trenów'",
+    "intro": "Początki polskiej poezji."
+  },
+
+  {
+    "id": "cul_001",
+    "topic": "polish culture",
+    "difficulty": "easy",
+    "question": "Kto skomponował Mazurka Dąbrowskiego?",
+    "answerKeywords": ["wybicki", "józef wybicki"],
+    "hint": "Józef Wybicki (słowa), melodia ludowa",
+    "intro": "Hymn Polski."
+  },
+  {
+    "id": "cul_002",
+    "topic": "polish culture",
+    "difficulty": "medium",
+    "question": "Kim był Fryderyk Chopin?",
+    "answerKeywords": ["kompozytor", "pianista", "muzyk"],
+    "hint": "Kompozytor, pianista epoki romantyzmu",
+    "intro": "Wybitny kompozytor."
+  },
+  {
+    "id": "cul_003",
+    "topic": "polish culture",
+    "difficulty": "easy",
+    "question": "Co to jest 'polonez'?",
+    "answerKeywords": ["taniec", "polski taniec", "taniec narodowy"],
+    "hint": "Polski taniec narodowy",
+    "intro": "Taniec polonez."
+  },
+
+  {
+    "id": "cui_001",
+    "topic": "polish cuisine",
+    "difficulty": "easy",
+    "question": "Jakie jest tradycyjne polskie danie z kapusty kiszonej?",
+    "answerKeywords": ["bigos", "kapusta kiszona"],
+    "hint": "Bigos – duszona kapusta z mięsem",
+    "intro": "Tradycyjna potrawa."
+  },
+  {
+    "id": "cui_002",
+    "topic": "polish cuisine",
+    "difficulty": "easy",
+    "question": "Co to są pierogi?",
+    "answerKeywords": ["pierogi", "pierogi ruskie", "pierogi z mięsem"],
+    "hint": "Ciasto nadziewane mięsem, serem, kapustą lub owocami",
+    "intro": "Popularne danie."
+  },
+  {
+    "id": "cui_003",
+    "topic": "polish cuisine",
+    "difficulty": "medium",
+    "question": "Z czego robi się żurek?",
+    "answerKeywords": ["zakwas", "żur", "kiełbasa", "jajko"],
+    "hint": "Żurek na zakwasie żytnim, z kiełbasą i jajkiem",
+    "intro": "Zupa wielkanocna."
+  },
+
+  {
+    "id": "fam_001",
+    "topic": "famous poles",
+    "difficulty": "easy",
+    "question": "Kto odkrył rad i polon?",
+    "answerKeywords": ["curie", "maria curie-skłodowska", "skłodowska"],
+    "hint": "Maria Skłodowska-Curie",
+    "intro": "Podwójna noblistka."
+  },
+  {
+    "id": "fam_002",
+    "topic": "famous poles",
+    "difficulty": "easy",
+    "question": "Kim był Mikołaj Kopernik?",
+    "answerKeywords": ["astronom", "kopernik", "heliocentryzm"],
+    "hint": "Astronom, twórca teorii heliocentrycznej",
+    "intro": "Wielki astronom."
+  },
+  {
+    "id": "fam_003",
+    "topic": "famous poles",
+    "difficulty": "medium",
+    "question": "Kto wynalazł lampę naftową?",
+    "answerKeywords": ["łukasiewicz", "ignacy łukasiewicz"],
+    "hint": "Ignacy Łukasiewicz",
+    "intro": "Przemysł naftowy."
+  },
+
+  {
+    "id": "hol_001",
+    "topic": "polish holidays",
+    "difficulty": "easy",
+    "question": "Kiedy jest Święto Niepodległości?",
+    "answerKeywords": ["11 listopada", "listopada"],
+    "hint": "11 listopada – rocznica odzyskania niepodległości (1918)",
+    "intro": "Święto państwowe."
+  },
+  {
+    "id": "hol_002",
+    "topic": "polish holidays",
+    "difficulty": "easy",
+    "question": "Co upamiętnia 1 maja?",
+    "answerKeywords": ["święto pracy", "pracy"],
+    "hint": "Międzynarodowe Święto Pracy",
+    "intro": "Święto pracujących."
+  },
+  {
+    "id": "hol_003",
+    "topic": "polish holidays",
+    "difficulty": "medium",
+    "question": "Kiedy jest Dzień Flagi?",
+    "answerKeywords": ["2 maja"],
+    "hint": "2 maja",
+    "intro": "Dzień poświęcony fladze."
+  },
+
+  {
+    "id": "lan_001",
+    "topic": "polish language",
+    "difficulty": "easy",
+    "question": "Jak przywitasz się po polsku formalnie?",
+    "answerKeywords": ["dzień dobry"],
+    "hint": "Dzień dobry",
+    "intro": "Formalne powitanie."
+  },
+  {
+    "id": "lan_002",
+    "topic": "polish language",
+    "difficulty": "easy",
+    "question": "Co znaczy 'dziękuję'?",
+    "answerKeywords": ["dziękuję", "podziękowanie"],
+    "hint": "Wyrażenie wdzięczności",
+    "intro": "Zwrot grzecznościowy."
+  },
+  {
+    "id": "lan_003",
+    "topic": "polish language",
+    "difficulty": "medium",
+    "question": "Jak odmienić przez przypadki wyraz 'Polska' w narzędniku?",
+    "answerKeywords": ["polską"],
+    "hint": "Polską (np. 'jestem z Polską')",
+    "intro": "Gramatyka polska."
+  }
 ]
