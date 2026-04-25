@@ -235,7 +235,8 @@ class AIService {
         await new Promise(r => setTimeout(r, 500));
         continue;
       }
-      return null;
+      console.error("❌ OpenAI failed after retries");
+      throw err;
     }
   }
 }
@@ -302,8 +303,16 @@ Zwróć JSON:
 
     try {
       const resp = await this.call(prompt);
-      const evalResult = safeJSONParse(resp, null);
-      if (!evalResult) throw new Error('Invalid JSON');
+
+if (!resp) {
+  throw new Error("Empty AI response");
+}
+
+const evalResult = safeJSONParse(resp, null);
+
+if (!evalResult) {
+  throw new Error("Invalid JSON");
+}
       const scores = evalResult.scores;
       const total = scores ? Object.values(scores).reduce((a,b)=>a+b,0)/5 : evalResult.totalScore;
       evalResult.totalScore = Math.min(10, Math.max(0, Math.round(total)));
