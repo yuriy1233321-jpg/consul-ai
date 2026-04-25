@@ -325,15 +325,16 @@ app.get("/api/admin/stats", (req, res) => {
 // =====================
 const __dirname = new URL('.', import.meta.url).pathname;
 
-// віддаємо assets
-app.use("/assets", express.static(path.join(__dirname, "client/dist/assets")));
-
-// віддаємо весь dist
 app.use(express.static(path.join(__dirname, "client/dist")));
 
-// SPA fallback
 app.get("*", (req, res) => {
   if (!req.path.startsWith("/api")) {
-    res.sendFile(path.join(__dirname, "client/dist/index.html"));
+    const filePath = path.join(__dirname, "client/dist/index.html");
+    
+    if (fs.existsSync(filePath)) {
+      res.sendFile(filePath);
+    } else {
+      res.send("Frontend not built");
+    }
   }
 });
