@@ -215,11 +215,22 @@ Zwróć JSON:
   }
 
   // 📦 STATIC
-  const filtered = preferredTopic
-    ? questionBank.filter(q => q.topic === preferredTopic)
-    : questionBank;
+  // ❌ виключаємо вже використані теми
+const unused = questionBank.filter(q => !session.askedQuestions.includes(q.id));
 
-  return filtered[Math.floor(Math.random() * filtered.length)];
+// якщо всі теми вже були — ресет
+const pool = unused.length > 0 ? unused : questionBank;
+
+// якщо є слабка тема — пріоритет
+const filtered = preferredTopic
+  ? pool.filter(q => q.topic === preferredTopic)
+  : pool;
+
+// якщо після фільтра нічого — беремо pool
+const finalPool = filtered.length > 0 ? filtered : pool;
+
+// випадкове питання
+return finalPool[Math.floor(Math.random() * finalPool.length)];
 }
 
 // =====================
@@ -250,7 +261,15 @@ class InterviewController {
     else return this.createSession(userId);
   }
   createSession(userId) {
-    const session = { userId, step: "ask_name", answers: [], askedTopics: [], questionIndex: 0, finished: false };
+    const session = {
+  userId,
+  step: "ask_name",
+  answers: [],
+  askedTopics: [],
+  askedQuestions: [], // 👈 ДОДАВ
+  questionIndex: 0,
+  finished: false
+};
     usersDB.update(u => u.userId === userId, u => ({ ...u, session })) || usersDB.insert({ userId, session, createdAt: Date.now() });
     return session;
   }
@@ -271,6 +290,7 @@ class InterviewController {
       session.step = "ready";
       const first = questionBank[0];
       session.currentQuestion = first;
+      session.askedQuestions.push(first.id);
       session.currentTopic = first.topic;
       session.askedTopics = session.askedTopics || [];
       session.askedTopics.push(first.topic);
@@ -297,10 +317,17 @@ class InterviewController {
         return res.json(final);
       }
       const nextQ = await getNextQuestion(userId, session);
-      
-      session.currentQuestion = nextQ;
-      session.currentTopic = nextQ.topic;
-      session.askedTopics.push(nextQ.topic);
+
+session.currentQuestion = nextQ;
+session.currentTopic = nextQ.topic;
+
+// ✅ контроль унікальності
+session.askedQuestions.push(nextQ.id);
+
+// ✅ контроль тем
+if (!session.askedTopics.includes(nextQ.topic)) {
+  session.askedTopics.push(nextQ.topic);
+}
       return res.json({ type: "next_question", evaluation: { score: evaluation.score, feedback: evaluation.feedback }, nextQuestion: { intro: nextQ.intro || "Proszę odpowiedzieć.", question: nextQ.question, hint: nextQ.hint, index: session.questionIndex+1 }, progress: session.progress, current: session.questionIndex, total: CONFIG.QUESTIONS_PER_SESSION });
     }
     return res.json({ type: "error", message: "Unknown step" });
