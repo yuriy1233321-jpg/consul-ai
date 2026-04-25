@@ -5,29 +5,55 @@ import path from "path";
 import crypto from "crypto";
 import Fuse from "fuse.js";
 import rateLimit from "express-rate-limit";
-import helmet from 'helmet';
-import { authenticateToken } from './security/auth.js';
-import { validateChatInput, handleValidationErrors, validateLogin, validateRegister } from './security/validation.js';
-import { authLimiter, chatLimiter } from './security/rateLimit.js';
-import { loginUser, registerUser } from './security/auth.js';
+import helmet from "helmet";
+import { authenticateToken, registerUser, loginUser } from './security/auth.js';
+import { validateChatInput, handleValidationErrors, validateRegister, validateLogin } from './security/validation.js';
+import { authLimiter, chatLimiter, adminLimiter } from './security/rateLimit.js';
 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ========== ПЕРЕВІРКА ЗМІННИХ СЕРЕДОВИЩА ==========
+const REQUIRED_ENV = ['OPENAI_API_KEY', 'JWT_SECRET', 'ADMIN_API_KEY', 'CERT_SECRET'];
+for (const envVar of REQUIRED_ENV) {
+  if (!process.env[envVar]) {
+    console.error(`❌ Missing ${envVar} in environment`);
+    process.exit(1);
+  }
+}
+
+// ========== КОНФІГУРАЦІЯ ==========
 const CONFIG = {
   API_KEY: process.env.OPENAI_API_KEY,
   QUESTIONS_PER_SESSION: 10,
-  ADMIN_API_KEY: process.env.ADMIN_API_KEY || "admin123",
-  CERT_SECRET: process.env.CERT_SECRET || crypto.randomBytes(32).toString("hex"),
+  ADMIN_API_KEY: process.env.ADMIN_API_KEY,
+  CERT_SECRET: process.env.CERT_SECRET,
   APP_URL: process.env.APP_URL || "http://localhost:3000",
 };
 
-if (!CONFIG.API_KEY) {
-  console.error("❌ OPENAI_API_KEY required");
-  process.exit(1);
-}
+// ========== БЕЗПЕКА ==========
+app.use(helmet());
 
+// Налаштування CORS
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',') 
+  : ['http://localhost:3000', 'https://consul-ai-production.up.railway.app'];
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
+
+app.use(express.json({ limit: '1mb' }));
+
+// ========== ДОПОМІЖНІ ФУНКЦІЇ (без змін) ==========
 function detectGender(name) {
   if (!name) return "male";
   const n = name.toLowerCase().trim();
@@ -39,6 +65,7 @@ function safeJSONParse(str, fallback = {}) {
   try { return JSON.parse(str); } catch { return fallback; }
 }
 
+// ========== ЗБЕРІГАННЯ ДАНИХ (збережено, але краще використовувати базу даних) ==========
 class DataStore {
   constructor(file) { this.file = file; this.data = this.load(); }
   load() { try { return JSON.parse(fs.readFileSync(this.file, "utf8")); } catch { return []; } }
@@ -51,6 +78,7 @@ class DataStore {
 const usersDB = new DataStore("users.json");
 const resultsDB = new DataStore("results.json");
 
+// ========== БАНК ПИТАНЬ ==========
 let questionBank = [];
 try {
   if (fs.existsSync("questions.json")) {
@@ -58,14 +86,13 @@ try {
     console.log(`✅ Loaded ${questionBank.length} questions`);
   } else {
     questionBank = [
-      { id:"sym_001", topic:"polish symbols", difficulty:"easy", question:"Jakie są trzy polskie symbole narodowe?", answerKeywords:["orzeł","flaga","hymn"], hint:"Orzeł, flaga, hymn", intro:"Symbole narodowe" },
-      { id:"his_001", topic:"polish history", difficulty:"easy", question:"Kto był pierwszym królem Polski?", answerKeywords:["bolesław chrobry","chrobry"], hint:"Bolesław Chrobry", intro:"Historia" },
-      { id:"geo_001", topic:"polish geography", difficulty:"easy", question:"Jaka rzeka jest najdłuższa w Polsce?", answerKeywords:["wisła"], hint:"Wisła", intro:"Geografia" }
+      { id:"sym_001", topic:"polish symbols", difficulty:"easy", question:"Jakie są trzy polskie symbole narodowe?", answerKeywords:["orzeł","flaga","hymn"], hint:"Orzeł, flaga, hymn", intro:"Symbole narodowe" }
     ];
     fs.writeFileSync("questions.json", JSON.stringify(questionBank, null, 2));
   }
 } catch(e) { console.error("Question bank error", e); }
 
+// ========== ІНШІ КЛАСИ (без змін) ==========
 class FuzzyScorer {
   calculateScore(answer, keywords) {
     const ans = answer.toLowerCase();
@@ -144,7 +171,9 @@ class InterviewController {
     return session;
   }
   async handleMessage(req, res) {
-    let { userId, message } = req.body;
+    // Використовуємо userId з токена
+    const userId = req.user.userId;
+    let { message, mode = "learning" } = req.body;
     if (!userId) return res.status(400).json({ error: "userId required" });
     let session = this.getSession(userId);
     if (session.finished) {
@@ -198,8 +227,35 @@ class InterviewController {
 }
 const interviewController = new InterviewController();
 
-const adminLimiter = rateLimit({ windowMs: 15*60*1000, max: 100 });
-app.use("/api/admin", adminLimiter);
+// ========== МАРШРУТИ АВТЕНТИФІКАЦІЇ ==========
+app.post('/api/register', authLimiter, validateRegister, handleValidationErrors, (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    const user = registerUser(email, password, name);
+    res.status(201).json({ message: 'User created', user });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/login', authLimiter, validateLogin, handleValidationErrors, (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const { token, user } = loginUser(email, password);
+    res.json({ token, user });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// ========== ОСНОВНИЙ ЧАТ (захищений) ==========
+app.post('/chat', authenticateToken, chatLimiter, validateChatInput, handleValidationErrors, (req, res) => {
+  interviewController.handleMessage(req, res);
+});
+
+// ========== АДМІНКА ==========
+const adminLimiterMiddleware = rateLimit({ windowMs: 15*60*1000, max: 100 });
+app.use("/api/admin", adminLimiterMiddleware);
 app.use("/api/admin", (req, res, next) => {
   const key = req.headers["x-api-key"];
   if (key !== CONFIG.ADMIN_API_KEY) return res.status(401).json({ error: "Unauthorized" });
@@ -207,9 +263,7 @@ app.use("/api/admin", (req, res, next) => {
 });
 app.get("/api/admin/stats", (req, res) => res.json({ users: usersDB.findAll().length, results: resultsDB.findAll().length }));
 
-app.use(cors());
-app.use(express.json());
-app.post("/chat", (req, res) => interviewController.handleMessage(req, res));
+// ========== ПУБЛІЧНІ МАРШРУТИ ==========
 app.get("/health", (req, res) => res.json({ status: "healthy", version: "5.2" }));
 app.get("/api/certificate/verify", (req, res) => {
   const { token } = req.query;
@@ -219,10 +273,12 @@ app.get("/api/certificate/verify", (req, res) => {
   res.json({ valid: true, userId: data.userId, score: data.score, issuedAt: new Date(data.date).toISOString() });
 });
 
+// Статика фронтенду
 app.use(express.static("client/dist"));
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api")) return;
   res.sendFile(path.resolve("client/dist/index.html"));
 });
 
+// ========== ЗАПУСК ==========
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
