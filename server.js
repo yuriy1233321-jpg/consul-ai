@@ -5,6 +5,11 @@ import path from "path";
 import crypto from "crypto";
 import Fuse from "fuse.js";
 import rateLimit from "express-rate-limit";
+import helmet from 'helmet';
+import { authenticateToken } from './security/auth.js';
+import { validateChatInput, handleValidationErrors, validateLogin, validateRegister } from './security/validation.js';
+import { authLimiter, chatLimiter } from './security/rateLimit.js';
+import { loginUser, registerUser } from './security/auth.js';
 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 const app = express();
