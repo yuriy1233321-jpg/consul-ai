@@ -696,10 +696,22 @@ function verifyToken(token) {
 // =====================
 class InterviewController {
   getSession(userId) {
-    let user = usersDB.findOne(u => u.userId === userId);
-    if (user && !user.session?.finished) return user.session;
-    else return this.createSession(userId);
+  let user = usersDB.findOne(u => u.userId === userId);
+
+  if (!user) {
+    return this.createSession(userId);
   }
+
+  if (!user.session) {
+    return this.createSession(userId);
+  }
+
+  if (user.session.finished) {
+    return this.createSession(userId);
+  }
+
+  return user.session;
+}
   createSession(userId) {
     const session = {
       userId,
@@ -1066,15 +1078,18 @@ app.post('/api/register', authLimiter,
     if (existing) return res.status(400).json({ error: "User already exists" });
     const hashed = await bcrypt.hash(password, 10);
     const userId = `user_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
-    usersDB.insert({
-      userId,
-      email,
-      password: hashed,
-      name: name || email.split('@')[0],
-      plan: "demo",
-      subscriptionExpiresAt: null,
-      createdAt: Date.now()
-    });
+    const session = interviewController.createSession(userId);
+
+usersDB.insert({
+  userId,
+  email,
+  password: hashed,
+  name: name || email.split('@')[0],
+  plan: "demo",
+  subscriptionExpiresAt: null,
+  createdAt: Date.now(),
+  session
+});
     res.status(201).json({ message: "User created", userId });
   }
 );
