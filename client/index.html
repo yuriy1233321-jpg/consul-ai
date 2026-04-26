@@ -2,12 +2,456 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CONSUL.AI</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>CONSUL.AI – Symulator rozmowy na Kartę Polaka</title>
+    <!-- TailwindCSS + Font Awesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Custom scrollbar & animations */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #dc143c;
+            border-radius: 10px;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.2s ease-out forwards;
+        }
+        .typing-indicator span {
+            animation: blink 1.4s infinite;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink {
+            0%, 60%, 100% { opacity: 0.4; transform: translateY(0); }
+            30% { opacity: 1; transform: translateY(-6px); }
+        }
+    </style>
 </head>
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 font-sans antialiased">
+
+    <!-- Main container -->
+    <div id="app" class="max-w-4xl mx-auto px-4 py-6 md:py-10">
+        <!-- Header / Auth status -->
+        <div class="bg-white rounded-2xl shadow-lg mb-6 overflow-hidden transition-all" id="authHeader">
+            <div class="bg-gradient-to-r from-red-700 to-red-600 px-6 py-4 text-white flex justify-between items-center flex-wrap gap-3">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-gavel text-2xl"></i>
+                    <h1 class="text-2xl font-bold tracking-tight">CONSUL.AI</h1>
+                    <span class="text-xs bg-white/20 px-2 py-1 rounded-full">Karta Polaka</span>
+                </div>
+                <div id="userInfo" class="flex items-center gap-4 text-sm"></div>
+            </div>
+        </div>
+
+        <!-- Auth Forms (Login / Register) -->
+        <div id="authForms" class="bg-white rounded-2xl shadow-lg p-6 mb-6 transition-all">
+            <div class="flex gap-4 border-b pb-2 mb-4">
+                <button id="showLoginBtn" class="auth-tab-btn font-semibold text-red-600 border-b-2 border-red-600 pb-2">Zaloguj się</button>
+                <button id="showRegisterBtn" class="auth-tab-btn font-semibold text-gray-500 pb-2">Zarejestruj się</button>
+            </div>
+            <!-- Login form -->
+            <div id="loginForm" class="space-y-4">
+                <input type="email" id="loginEmail" placeholder="Email" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none">
+                <input type="password" id="loginPassword" placeholder="Hasło" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none">
+                <button id="doLoginBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-xl transition">Zaloguj się</button>
+                <p id="loginError" class="text-red-500 text-sm text-center hidden"></p>
+            </div>
+            <!-- Register form -->
+            <div id="registerForm" class="space-y-4 hidden">
+                <input type="text" id="regName" placeholder="Imię i nazwisko" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none">
+                <input type="email" id="regEmail" placeholder="Email" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none">
+                <input type="password" id="regPassword" placeholder="Hasło (min. 6 znaków)" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none">
+                <button id="doRegisterBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-xl transition">Zarejestruj się</button>
+                <p id="registerError" class="text-red-500 text-sm text-center hidden"></p>
+            </div>
+        </div>
+
+        <!-- Chat Interface (visible only after login) -->
+        <div id="chatInterface" class="hidden bg-white rounded-2xl shadow-lg overflow-hidden">
+            <!-- Progress bar -->
+            <div class="px-6 pt-4 pb-2 border-b border-gray-100">
+                <div class="flex justify-between text-sm text-gray-600 mb-1">
+                    <span><i class="fas fa-chart-line mr-1"></i> Postęp rozmowy</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div id="progressFill" class="h-full bg-gradient-to-r from-red-600 to-red-400 w-0 transition-all duration-300"></div>
+                </div>
+                <div class="text-xs text-gray-400 mt-1 flex justify-between">
+                    <span id="currentQuestionIdx">Pytanie 0</span>
+                    <span id="totalQuestions">z 10</span>
+                </div>
+            </div>
+            <!-- Messages area -->
+            <div id="chatMessages" class="chat-messages h-[450px] overflow-y-auto p-4 space-y-4 bg-gray-50"></div>
+            <!-- Input area -->
+            <div class="border-t border-gray-200 p-4 bg-white flex gap-3 items-end">
+                <textarea id="messageInput" rows="1" placeholder="Napisz odpowiedź po polsku..." class="flex-1 p-3 border border-gray-300 rounded-2xl resize-none focus:ring-2 focus:ring-red-500 outline-none transition"></textarea>
+                <button id="sendBtn" class="bg-red-600 hover:bg-red-700 text-white rounded-full w-12 h-12 flex items-center justify-center transition disabled:opacity-50">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+            <div class="text-center text-xs text-gray-400 pb-3">Shift+Enter = nowa linia</div>
+        </div>
+    </div>
+
+    <!-- Paywall Modal (hidden by default) -->
+    <div id="paywallModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 hidden transition-all">
+        <div class="bg-white rounded-2xl max-w-md w-full mx-4 p-6 shadow-2xl animate-fade-in">
+            <div class="text-center mb-4">
+                <i class="fas fa-lock text-5xl text-red-500 mb-2"></i>
+                <h2 class="text-2xl font-bold text-gray-800">Dostęp ograniczony</h2>
+            </div>
+            <p id="paywallMessage" class="text-gray-600 mb-4 text-center"></p>
+            <div id="paywallPlans" class="space-y-2 mb-6"></div>
+            <button id="closePaywallBtn" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 rounded-xl transition">Zamknij</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Helper functions ---
+        const API_BASE = '';  // relative to same origin
+        let token = localStorage.getItem('token');
+        let currentUser = null;
+        let isAuthenticated = !!token;
+        let messages = [];
+        let loading = false;
+        let currentProgress = 0;
+        let currentQuestionIndex = 0;
+        let totalQuestions = 10;
+
+        // DOM elements
+        const authFormsDiv = document.getElementById('authForms');
+        const chatInterfaceDiv = document.getElementById('chatInterface');
+        const userInfoSpan = document.getElementById('userInfo');
+        const loginForm = document.getElementById('loginForm');
+        const registerForm = document.getElementById('registerForm');
+        const showLoginBtn = document.getElementById('showLoginBtn');
+        const showRegisterBtn = document.getElementById('showRegisterBtn');
+        const doLoginBtn = document.getElementById('doLoginBtn');
+        const doRegisterBtn = document.getElementById('doRegisterBtn');
+        const loginError = document.getElementById('loginError');
+        const registerError = document.getElementById('registerError');
+        const chatMessagesDiv = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const progressFill = document.getElementById('progressFill');
+        const progressPercent = document.getElementById('progressPercent');
+        const currentQuestionIdxSpan = document.getElementById('currentQuestionIdx');
+        const totalQuestionsSpan = document.getElementById('totalQuestions');
+        const paywallModal = document.getElementById('paywallModal');
+        const paywallMessage = document.getElementById('paywallMessage');
+        const paywallPlansDiv = document.getElementById('paywallPlans');
+        const closePaywallBtn = document.getElementById('closePaywallBtn');
+
+        // --- API calls ---
+        async function apiCall(endpoint, method = 'POST', body = null) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const options = { method, headers };
+            if (body) options.body = JSON.stringify(body);
+            const res = await fetch(API_BASE + endpoint, options);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            return data;
+        }
+
+        async function register(email, password, name) {
+            return await apiCall('/api/register', 'POST', { email, password, name });
+        }
+
+        async function login(email, password) {
+            const data = await apiCall('/api/login', 'POST', { email, password });
+            token = data.token;
+            currentUser = data.user;
+            localStorage.setItem('token', token);
+            localStorage.setItem('user', JSON.stringify(currentUser));
+            isAuthenticated = true;
+            return data;
+        }
+
+        async function sendChatMessage(message) {
+            return await apiCall('/chat', 'POST', { message });
+        }
+
+        // --- UI Helpers ---
+        function updateProgress(progress, current, total) {
+            currentProgress = progress || 0;
+            currentQuestionIndex = current || 0;
+            totalQuestions = total || 10;
+            const percent = Math.min(100, Math.max(0, currentProgress));
+            progressFill.style.width = `${percent}%`;
+            progressPercent.innerText = `${percent}%`;
+            currentQuestionIdxSpan.innerText = `Pytanie ${currentQuestionIndex}`;
+            totalQuestionsSpan.innerText = `z ${totalQuestions}`;
+        }
+
+        function addMessage(role, text, extra = {}) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`;
+            const bubble = document.createElement('div');
+            if (role === 'user') {
+                bubble.className = 'bg-red-600 text-white rounded-2xl rounded-br-md px-4 py-2 max-w-[80%] shadow-md';
+                bubble.innerText = text;
+            } else {
+                bubble.className = 'bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-bl-md px-4 py-2 max-w-[80%] shadow-sm';
+                bubble.innerHTML = `<div>${text}</div>`;
+                if (extra.hint) {
+                    const hintDiv = document.createElement('div');
+                    hintDiv.className = 'text-xs text-red-500 mt-1 border-t border-gray-100 pt-1';
+                    hintDiv.innerHTML = `<i class="fas fa-lightbulb mr-1"></i> ${extra.hint}`;
+                    bubble.appendChild(hintDiv);
+                }
+                if (extra.evaluation) {
+                    const evalDiv = document.createElement('div');
+                    evalDiv.className = 'text-xs bg-gray-100 rounded-lg p-2 mt-2';
+                    evalDiv.innerHTML = `<span class="font-semibold">📊 Ocena: ${extra.evaluation.score}/10</span><br>${extra.evaluation.feedback || ''}`;
+                    bubble.appendChild(evalDiv);
+                }
+            }
+            msgDiv.appendChild(bubble);
+            chatMessagesDiv.appendChild(msgDiv);
+            chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+        }
+
+        function addExplanation(correctAnswer, explanation) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'flex justify-start animate-fade-in';
+            msgDiv.innerHTML = `
+                <div class="bg-blue-50 border-l-4 border-blue-500 rounded-xl px-4 py-3 max-w-[90%] shadow-sm">
+                    <div class="font-semibold text-blue-800 mb-1"><i class="fas fa-graduation-cap mr-2"></i>Wyjaśnienie</div>
+                    <div class="text-gray-700 text-sm mb-2">${explanation}</div>
+                    <div class="text-xs text-gray-500"><i class="fas fa-check-circle mr-1"></i> Poprawna odpowiedź: ${correctAnswer}</div>
+                </div>
+            `;
+            chatMessagesDiv.appendChild(msgDiv);
+            chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+        }
+
+        function showPaywall(message, plans) {
+            paywallMessage.innerText = message || 'Osiągnięto limit wersji demo.';
+            paywallPlansDiv.innerHTML = '';
+            if (plans && plans.length) {
+                plans.forEach(plan => {
+                    const btn = document.createElement('a');
+                    btn.href = plan.link || 'https://flexiway.pl/cennik/';
+                    btn.target = '_blank';
+                    btn.className = 'block w-full bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 rounded-xl text-center transition';
+                    btn.innerText = `Kup ${plan.name || 'plan'} → ${plan.price || ''}`;
+                    paywallPlansDiv.appendChild(btn);
+                });
+            } else {
+                const defaultLink = document.createElement('a');
+                defaultLink.href = 'https://flexiway.pl/cennik/';
+                defaultLink.target = '_blank';
+                defaultLink.className = 'block w-full bg-red-600 text-white font-semibold py-2 rounded-xl text-center';
+                defaultLink.innerText = 'Przejdź do strony z cenami';
+                paywallPlansDiv.appendChild(defaultLink);
+            }
+            paywallModal.classList.remove('hidden');
+        }
+
+        function hidePaywall() {
+            paywallModal.classList.add('hidden');
+        }
+
+        // Start interview after login
+        async function startInterview() {
+            try {
+                const res = await sendChatMessage('start');
+                handleServerResponse(res);
+            } catch (err) {
+                console.error(err);
+                addMessage('consul', '❌ Błąd połączenia. Spróbuj ponownie później.');
+            }
+        }
+
+        // Process server responses
+        function handleServerResponse(data) {
+            if (data.type === 'question') {
+                addMessage('consul', data.question, { hint: data.hint });
+                if (data.progress !== undefined) updateProgress(data.progress, data.index-1, data.total);
+                if (data.intro) addMessage('consul', data.intro, {});
+            }
+            else if (data.type === 'next_question') {
+                if (data.evaluation) {
+                    addMessage('consul', data.evaluation.feedback || `Ocena: ${data.evaluation.score}/10`, { evaluation: data.evaluation });
+                }
+                addMessage('consul', data.nextQuestion.question, { hint: data.nextQuestion.hint });
+                updateProgress(data.progress, data.current, data.total);
+            }
+            else if (data.type === 'final') {
+                let msg = `Twój wynik: ${data.averageScore}/10. ${data.recommendation === 'ready' ? 'Gratulacje! Jesteś gotowy do egzaminu.' : 'Ćwicz dalej!'}`;
+                if (data.weakTopics?.length) msg += `<br><span class="text-sm">⚠️ Słabe tematy: ${data.weakTopics.join(', ')}</span>`;
+                if (data.certificate) msg += `<br><a href="${data.certificate.verificationUrl}" target="_blank" class="text-red-600 underline">📜 Pobierz certyfikat</a>`;
+                addMessage('consul', msg, {});
+                updateProgress(100, data.totalQuestions, data.totalQuestions);
+                sendBtn.disabled = true;
+                messageInput.disabled = true;
+            }
+            else if (data.type === 'explanation') {
+                addExplanation(data.correctAnswer, data.explanation);
+                addMessage('consul', data.question, { hint: data.hint });
+            }
+            else if (data.type === 'info') {
+                addMessage('consul', data.message, {});
+            }
+            else if (data.type === 'paywall' || data.type === 'expired') {
+                showPaywall(data.message, data.plans);
+            }
+            else if (data.type === 'repeat_topic') {
+                addMessage('consul', data.message, { hint: data.hint });
+            }
+            else if (data.type === 'limit_reached') {
+                showPaywall(data.message, [{ name: 'Wykup PRO', link: '/pricing' }]);
+            }
+            else if (data.type === 'error') {
+                addMessage('consul', `⚠️ ${data.message || 'Wystąpił błąd. Spróbuj ponownie.'}`, {});
+            }
+        }
+
+        // --- Authentication UI ---
+        function showAuthForms(showLogin) {
+            if (showLogin) {
+                loginForm.classList.remove('hidden');
+                registerForm.classList.add('hidden');
+                showLoginBtn.className = 'auth-tab-btn font-semibold text-red-600 border-b-2 border-red-600 pb-2';
+                showRegisterBtn.className = 'auth-tab-btn font-semibold text-gray-500 pb-2';
+            } else {
+                loginForm.classList.add('hidden');
+                registerForm.classList.remove('hidden');
+                showRegisterBtn.className = 'auth-tab-btn font-semibold text-red-600 border-b-2 border-red-600 pb-2';
+                showLoginBtn.className = 'auth-tab-btn font-semibold text-gray-500 pb-2';
+            }
+        }
+
+        function updateUIForAuth() {
+            if (isAuthenticated && currentUser) {
+                authFormsDiv.classList.add('hidden');
+                chatInterfaceDiv.classList.remove('hidden');
+                userInfoSpan.innerHTML = `<span class="text-white/80 text-sm">👤 ${currentUser.name || currentUser.email}</span>
+                                          <button id="logoutBtn" class="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full text-sm transition">Wyloguj</button>`;
+                document.getElementById('logoutBtn')?.addEventListener('click', () => {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    location.reload();
+                });
+                // Clear messages and start interview
+                chatMessagesDiv.innerHTML = '';
+                startInterview();
+            } else {
+                authFormsDiv.classList.remove('hidden');
+                chatInterfaceDiv.classList.add('hidden');
+                userInfoSpan.innerHTML = '';
+            }
+        }
+
+        // --- Event listeners ---
+        showLoginBtn.addEventListener('click', () => showAuthForms(true));
+        showRegisterBtn.addEventListener('click', () => showAuthForms(false));
+
+        doLoginBtn.addEventListener('click', async () => {
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            loginError.classList.add('hidden');
+            if (!email || !password) {
+                loginError.innerText = 'Wypełnij wszystkie pola.';
+                loginError.classList.remove('hidden');
+                return;
+            }
+            try {
+                await login(email, password);
+                updateUIForAuth();
+            } catch (err) {
+                loginError.innerText = err.message || 'Nieprawidłowy email lub hasło.';
+                loginError.classList.remove('hidden');
+            }
+        });
+
+        doRegisterBtn.addEventListener('click', async () => {
+            const name = document.getElementById('regName').value.trim();
+            const email = document.getElementById('regEmail').value.trim();
+            const password = document.getElementById('regPassword').value;
+            registerError.classList.add('hidden');
+            if (!email || !password || !name) {
+                registerError.innerText = 'Wypełnij wszystkie pola.';
+                registerError.classList.remove('hidden');
+                return;
+            }
+            if (password.length < 6) {
+                registerError.innerText = 'Hasło musi mieć co najmniej 6 znaków.';
+                registerError.classList.remove('hidden');
+                return;
+            }
+            try {
+                await register(email, password, name);
+                await login(email, password);
+                updateUIForAuth();
+            } catch (err) {
+                registerError.innerText = err.message || 'Rejestracja nie powiodła się.';
+                registerError.classList.remove('hidden');
+            }
+        });
+
+        // Send message
+        async function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || loading) return;
+            loading = true;
+            sendBtn.disabled = true;
+            addMessage('user', text);
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            try {
+                const res = await sendChatMessage(text);
+                handleServerResponse(res);
+            } catch (err) {
+                console.error(err);
+                addMessage('consul', '❌ Błąd połączenia. Spróbuj ponownie.');
+            } finally {
+                loading = false;
+                sendBtn.disabled = false;
+                messageInput.focus();
+            }
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+        closePaywallBtn.addEventListener('click', hidePaywall);
+
+        // Initial check
+        if (token && localStorage.getItem('user')) {
+            try {
+                currentUser = JSON.parse(localStorage.getItem('user'));
+                isAuthenticated = true;
+                updateUIForAuth();
+            } catch(e) { /* ignore */ }
+        } else {
+            updateUIForAuth();
+        }
+        totalQuestionsSpan.innerText = 'z 10';
+    </script>
 </body>
 </html>
