@@ -203,6 +203,7 @@ class DataStore {
 const usersDB = new DataStore("users.json");
 const resultsDB = new DataStore("results.json");
 const memoryStore = new DataStore("memory.json");
+const explanationCache = new DataStore("explanations.json"); // нове сховище для кешу пояснень
 
 // =====================
 // 📚 БАНК ПИТАНЬ (з індексами для швидкості)
@@ -598,6 +599,44 @@ Zwróć JSON: { "question": "...", "hint": "..." }
 }
 
 // =====================
+// 🧠 ГЕНЕРАЦІЯ ПОЯСНЕНЬ (з кешуванням)
+// =====================
+async function getOrGenerateExplanation(questionId, questionText, correctAnswer) {
+  // Перевіряємо кеш
+  const cached = explanationCache.findOne(e => e.questionId === questionId);
+  if (cached && cached.explanation) {
+    console.log(`📖 Using cached explanation for ${questionId}`);
+    return cached.explanation;
+  }
+
+  // Генеруємо через AI
+  const prompt = `
+Pytanie: ${questionText}
+Poprawna odpowiedź: ${correctAnswer}
+
+Wyjaśnij krótko i prosto (2-3 zdania), dlaczego to jest poprawna odpowiedź.
+`;
+  try {
+    const resp = await aiService.call(
+      "You are a helpful Polish tutor. Explain simply in Polish.",
+      prompt
+    );
+    if (!resp) throw new Error("No AI response");
+    // Якщо відповідь не JSON, використовуємо як текст
+    let explanation = resp;
+    const parsed = safeJSONParse(resp, null);
+    if (parsed && parsed.explanation) explanation = parsed.explanation;
+    else if (parsed && parsed.text) explanation = parsed.text;
+    // Зберігаємо в кеш
+    explanationCache.insert({ questionId, explanation, createdAt: Date.now() });
+    return explanation;
+  } catch (err) {
+    console.error("Explanation generation failed:", err);
+    return "Poprawna odpowiedź to: " + correctAnswer;
+  }
+}
+
+// =====================
 // 🎯 ВИБІР НАСТУПНОГО ПИТАННЯ (з індексами)
 // =====================
 async function getNextQuestion(userId, session, lastScore) {
@@ -692,26 +731,16 @@ function verifyToken(token) {
 }
 
 // =====================
-// 🎮 КОНТРОЛЕР ІНТЕРВ'Ю (збереження сесії)
+// 🎮 КОНТРОЛЕР ІНТЕРВ'Ю (збереження сесії + пояснення)
 // =====================
 class InterviewController {
   getSession(userId) {
-  let user = usersDB.findOne(u => u.userId === userId);
-
-  if (!user) {
-    return this.createSession(userId);
+    let user = usersDB.findOne(u => u.userId === userId);
+    if (!user) return this.createSession(userId);
+    if (!user.session) return this.createSession(userId);
+    if (user.session.finished) return this.createSession(userId);
+    return user.session;
   }
-
-  if (!user.session) {
-    return this.createSession(userId);
-  }
-
-  if (user.session.finished) {
-    return this.createSession(userId);
-  }
-
-  return user.session;
-}
   createSession(userId) {
     const session = {
       userId,
@@ -724,6 +753,7 @@ class InterviewController {
       questionIndex: 0,
       followUpCount: 0,
       lastFollowUpTopic: null,
+      explanationShownForQuestion: null, // ID питання, для якого вже показано пояснення
       finished: false,
       profile: { age: null, gender: null, level: null, goal: "karta_polaka" }
     };
@@ -842,6 +872,26 @@ class InterviewController {
 
         const score = evaluation.totalScore || 5;
 
+        // 🔥 НОВИЙ БЛОК: ПОЯСНЕННЯ У РЕЖИМІ НАВЧАННЯ
+        if (session.mode === "learning" && score < 5 && session.explanationShownForQuestion !== session.currentQuestion.id) {
+          const explanation = await getOrGenerateExplanation(
+            session.currentQuestion.id,
+            session.currentQuestion.question,
+            session.currentQuestion.hint || "brak dodatkowych informacji"
+          );
+          session.explanationShownForQuestion = session.currentQuestion.id;
+          this.saveSession(userId, session);
+          return res.json({
+            type: "explanation",
+            correctAnswer: session.currentQuestion.hint || "Proszę przeczytać powyższe wyjaśnienie.",
+            explanation: explanation,
+            message: "Spróbuj zapamiętać i odpowiedzieć ponownie.",
+            question: session.currentQuestion.question,
+            hint: session.mode === "learning" ? session.currentQuestion.hint : null,
+            mode: session.mode
+          });
+        }
+
         // Запобігання зациклюванню follow-up
         if (session.lastFollowUpTopic === session.currentTopic && score < 3) {
           session.followUpCount = 2;
@@ -860,7 +910,8 @@ class InterviewController {
               hint: session.currentQuestion.hint || "Przypomnij sobie podstawowe informacje."
             });
           }
-          if (score < 5 && message.length > 5) {
+          if (score < 5 && message.length > 5 && session.explanationShownForQuestion === session.currentQuestion.id) {
+            // Після пояснення використовуємо follow-up (якщо все ще неправильно)
             session.followUpCount = (session.followUpCount || 0) + 1;
             session.lastFollowUpTopic = session.currentTopic;
             incMetric("followUps");
@@ -893,6 +944,8 @@ class InterviewController {
         session.progress = Math.round((session.questionIndex / CONFIG.QUESTIONS_PER_SESSION) * 100);
         updateMemory(userId, session.currentTopic, score);
         if (score >= 6) session.followUpCount = 0;
+        // Скидаємо прапорець пояснення для наступного питання
+        session.explanationShownForQuestion = null;
 
         // Adaptive mode switching
         const newAvg = getAverageScore(userId);
@@ -1079,17 +1132,16 @@ app.post('/api/register', authLimiter,
     const hashed = await bcrypt.hash(password, 10);
     const userId = `user_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
     const session = interviewController.createSession(userId);
-
-usersDB.insert({
-  userId,
-  email,
-  password: hashed,
-  name: name || email.split('@')[0],
-  plan: "demo",
-  subscriptionExpiresAt: null,
-  createdAt: Date.now(),
-  session
-});
+    usersDB.insert({
+      userId,
+      email,
+      password: hashed,
+      name: name || email.split('@')[0],
+      plan: "demo",
+      subscriptionExpiresAt: null,
+      createdAt: Date.now(),
+      session
+    });
     res.status(201).json({ message: "User created", userId });
   }
 );
