@@ -20,6 +20,7 @@
     "qrcode": "^1.5.3",
     "jsonwebtoken": "^9.0.2",
     "bcrypt": "^5.1.1",
-    "express-validator": "^7.0.1"
+    "express-validator": "^7.0.1",
+    "stripe": "^14.0.0"
   }
 }
