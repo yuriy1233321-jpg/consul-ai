@@ -35,37 +35,23 @@ return ua;
 
 
 
-useEffect(()=>{
+useEffect(() => {
 
 fetch(
-
-"http://localhost:3000/api/dashboard",
-
+`${import.meta.env.VITE_API_URL}/api/dashboard`,
 {
-
-headers:{
-
+headers: {
 "x-device-id":
-
-localStorage.getItem(
-
-"deviceId"
-
+localStorage.getItem("deviceId")
+}
+}
 )
 
-}
-
-}
-
-)
-
-.then(r=>r.json())
-
+.then(r => r.json())
 .then(setData)
-
 .catch(console.error);
 
-},[]);
+}, []);
 
 
 

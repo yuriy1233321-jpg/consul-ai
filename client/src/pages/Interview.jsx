@@ -26,19 +26,21 @@ function Interview() {
     }
 
     try {
-      const response = await fetch("http://localhost:3000/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-device-id": deviceId,
-        },
-        body: JSON.stringify({
-          message: textInput,
-          language: selectedLanguage,
-          mode: selectedMode,
-          history: messages,
-        }),
-      });
+      const response = await fetch(
+`${import.meta.env.VITE_API_URL}/api/chat`,
+{
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-device-id": deviceId,
+  },
+  body: JSON.stringify({
+    message: textInput,
+    language: selectedLanguage,
+    mode: selectedMode,
+    history: messages,
+  }),
+});
 
       const data = await response.json();
 
