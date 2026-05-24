@@ -1,330 +1,323 @@
 import { useState } from "react";
-
-import { useNavigate }
-from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import {
+  loginGoogle,
+  loginEmail,
+  registerEmail
+} from "../services/auth";
 
-loginGoogle,
+function Auth() {
+  const navigate = useNavigate();
 
-loginEmail,
+  const language =
+    localStorage.getItem("language") ||
+    "українська";
 
-registerEmail
+  const [email, setEmail] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
+
+
+  function text(ua, pl, ru) {
+    if (language === "polski")
+      return pl;
+
+    if (language === "русский")
+      return ru;
+
+    return ua;
+  }
+
+
+  async function handleGoogle() {
+
+    try {
+
+      setLoading(true);
+
+      await loginGoogle();
+
+      navigate("/interview");
+
+    } catch (err) {
+
+      console.error(err);
+
+      alert(
+        text(
+          "Помилка входу",
+          "Błąd logowania",
+          "Ошибка входа"
+        )
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
+  }
+
+
+
+  async function handleLogin() {
+
+    try {
+
+      setLoading(true);
+
+      await loginEmail(
+        email,
+        password
+      );
+
+      navigate("/interview");
+
+    } catch (err) {
+
+      console.error(err);
+
+      alert(
+        text(
+          "Невірний email або пароль",
+          "Niepoprawny email lub hasło",
+          "Неверный email или пароль"
+        )
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
+  }
+
+
+
+  async function handleRegister() {
+
+    try {
+
+      setLoading(true);
+
+      await registerEmail(
+        email,
+        password
+      );
+
+      navigate("/interview");
+
+    } catch (err) {
+
+      console.error(err);
+
+      alert(
+        text(
+          "Помилка реєстрації",
+          "Błąd rejestracji",
+          "Ошибка регистрации"
+        )
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
+  }
+
+
+
+  return (
+
+    <div style={containerStyle}>
+
+      <h1 style={{
+        textAlign:"center"
+      }}>
+        CONSUL.AI
+      </h1>
+
+
+      <input
+        required
+        type="email"
+        placeholder="Email"
+        value={email}
+        onChange={(e)=>
+          setEmail(
+            e.target.value
+          )
+        }
+        style={inputStyle}
+      />
+
+
+      <input
+        required
+        type="password"
+        placeholder={
+          text(
+            "Пароль",
+            "Hasło",
+            "Пароль"
+          )
+        }
+        value={password}
+        onChange={(e)=>
+          setPassword(
+            e.target.value
+          )
+        }
+        style={inputStyle}
+      />
+
+
+      <button
+        onClick={handleLogin}
+        disabled={loading}
+        style={buttonStyle}
+      >
+
+        {
+          loading
+          ? "..."
+          : text(
+              "Увійти",
+              "Zaloguj",
+              "Войти"
+            )
+        }
+
+      </button>
+
+
+
+      <button
+        onClick={handleRegister}
+        disabled={loading}
+        style={buttonStyle}
+      >
+
+        {
+          text(
+            "Реєстрація",
+            "Rejestracja",
+            "Регистрация"
+          )
+        }
+
+      </button>
+
+
+
+      <button
+        onClick={handleGoogle}
+        disabled={loading}
+        style={googleButton}
+      >
+
+        🔵 {
+
+          text(
+            "Увійти через Google",
+            "Zaloguj przez Google",
+            "Войти через Google"
+          )
+
+        }
+
+      </button>
+
+
+    </div>
+
+  );
 
 }
 
-from "../services/auth";
 
 
-function Auth(){
+const containerStyle = {
 
-const navigate=
-useNavigate();
+  maxWidth:"420px",
 
+  margin:"80px auto",
 
-const language=
+  padding:"40px",
 
-localStorage.getItem(
+  display:"flex",
 
-"language"
+  flexDirection:"column",
 
-)
+  gap:"16px",
 
-||
+  background:"#fff",
 
-"українська";
+  borderRadius:"24px",
 
+  boxShadow:
+  "0 10px 30px rgba(0,0,0,.08)"
 
-const [email,setEmail]=
+};
 
-useState("");
 
-const [password,setPassword]=
 
-useState("");
+const inputStyle = {
 
+  padding:"14px",
 
+  borderRadius:"12px",
 
-function text(
+  border:"1px solid #ddd",
 
-ua,
+  fontSize:"16px"
 
-pl,
+};
 
-ru
 
-){
 
-if(
+const buttonStyle = {
 
-language==="polski"
+  padding:"14px",
 
-)
+  border:"none",
 
-return pl;
+  borderRadius:"12px",
 
+  background:"#d62828",
 
-if(
+  color:"#fff",
 
-language==="русский"
+  fontWeight:"700",
 
-)
+  cursor:"pointer"
 
-return ru;
+};
 
 
-return ua;
 
-}
+const googleButton = {
 
+  ...buttonStyle,
 
+  background:"#fff",
 
-async function handleGoogle(){
+  color:"#111",
 
-try{
+  border:"1px solid #ddd"
 
-await loginGoogle();
+};
 
-navigate("/interview");
-
-}
-
-catch(err){
-
-console.log(err);
-
-alert("Login error");
-
-}
-
-}
-
-
-
-async function handleLogin(){
-
-try{
-
-await loginEmail(
-
-email,
-
-password
-
-);
-
-navigate("/interview");
-
-}
-
-catch{
-
-alert(
-
-text(
-
-"Помилка входу",
-
-"Błąd logowania",
-
-"Ошибка входа"
-
-)
-
-);
-
-}
-
-}
-
-
-
-async function handleRegister(){
-
-try{
-
-await registerEmail(
-
-email,
-
-password
-
-);
-
-navigate("/interview");
-
-}
-
-catch{
-
-alert(
-
-text(
-
-"Помилка реєстрації",
-
-"Błąd rejestracji",
-
-"Ошибка регистрации"
-
-)
-
-);
-
-}
-
-}
-
-
-
-return(
-
-<div
-style={{
-
-maxWidth:"420px",
-
-margin:"100px auto",
-
-display:"flex",
-
-flexDirection:"column",
-
-gap:"16px"
-
-}}
-
->
-
-<h1>
-
-CONSUL.AI
-
-</h1>
-
-
-<input
-
-placeholder=
-
-"Email"
-
-value={email}
-
-onChange={e=>
-
-setEmail(
-
-e.target.value
-
-)
-
-}
-
-/>
-
-
-<input
-
-type="password"
-
-placeholder=
-
-text(
-
-"Пароль",
-
-"Hasło",
-
-"Пароль"
-
-)
-
-value={password}
-
-onChange={e=>
-
-setPassword(
-
-e.target.value
-
-)
-
-}
-
-/>
-
-
-<button
-onClick={handleLogin}
->
-
-{
-
-text(
-
-"Увійти",
-
-"Zaloguj",
-
-"Войти"
-
-)
-
-}
-
-</button>
-
-
-
-<button
-onClick={handleRegister}
->
-
-{
-
-text(
-
-"Реєстрація",
-
-"Rejestracja",
-
-"Регистрация"
-
-)
-
-}
-
-</button>
-
-
-
-<button
-onClick={handleGoogle}
->
-
-{
-
-text(
-
-"Увійти через Google",
-
-"Zaloguj przez Google",
-
-"Войти через Google"
-
-)
-
-}
-
-</button>
-
-
-</div>
-
-);
-
-}
 
 
 export default Auth;
