@@ -387,9 +387,15 @@ user.phase
 
 
 
-await session.save();
-
 await user.save();
+
+await session.updateOne({
+$set:{
+scores: session.scores,
+weakTopics: session.weakTopics,
+messages: session.messages
+}
+});
 
 
 
