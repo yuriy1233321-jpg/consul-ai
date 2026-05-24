@@ -29,13 +29,10 @@ quantity:1
 
 
 success_url:
-
-"http://localhost:5173/success",
-
+"https://consul-ai-production-76b9.up.railway.app/success",
 
 cancel_url:
-
-"http://localhost:5173/cancel"
+"https://consul-ai-production-76b9.up.railway.app/cancel",
 
 });
 
