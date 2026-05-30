@@ -16,6 +16,7 @@ from "./routes/payment.js";
 
 import firebaseAuthRoute
 from "./routes/firebaseAuth.js";
+console.log("FIREBASE ROUTE LOADED");
 
 /*
 ========================
