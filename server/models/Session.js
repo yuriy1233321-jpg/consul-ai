@@ -14,6 +14,11 @@ required:true,
 unique:true
 },
 
+firebaseUid:{
+  type:String,
+  default:null,
+  index:true
+},
 
 /*
 ====================

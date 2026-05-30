@@ -1,317 +1,193 @@
 import { User } from "../models/User.js";
 import { Session } from "../models/Session.js";
 
-export async function checkUser(req,res,next){
+export async function checkUser(req, res, next) {
 
-try{
+  try {
 
-console.log(
-"CHECK USER START"
-);
+    console.log("CHECK USER START");
 
-const deviceId =
-req.headers["x-device-id"];
+    const firebaseUid =
+      req.headers["x-firebase-uid"];
 
+    if (!firebaseUid) {
 
-/*
-====================
+      console.log("NO FIREBASE UID");
 
-NO DEVICE
+      return res.status(401).json({
+        error: "No firebase uid"
+      });
 
-====================
-*/
+    }
 
-if(!deviceId){
+    /*
+    ====================
+    USER
+    ====================
+    */
 
-console.log(
-"NO DEVICE ID"
-);
+    let user = await User.findOne({
+      firebaseUid
+    });
 
-return res.status(401).json({
+    if (!user) {
 
-error:"No device id"
+      console.log(
+        "USER NOT FOUND"
+      );
 
-});
+      return res.status(401).json({
+        error: "User not found in database"
+      });
 
-}
+    }
 
+    /*
+    ====================
+    SESSION
+    ====================
+    */
 
+    let session =
+      await Session.findOne({
+        deviceId: firebaseUid
+      });
 
-/*
-====================
+    if (!session) {
 
-USER
+      console.log(
+        "CREATING SESSION"
+      );
 
-====================
-*/
+      session =
+        await Session.create({
 
-let user =
+          deviceId: firebaseUid,
 
-await User.findOne({
+          messages: [],
 
-deviceId
+          scores: [],
 
-});
+          weakTopics: [],
 
+          lastTopic: null
 
-if(!user){
+        });
 
-console.log(
-"CREATING USER"
-);
+    }
 
+    /*
+    ====================
+    RESET LIMIT
+    ====================
+    */
 
-user =
+    const passed =
 
-await User.create({
+      (
+        Date.now() -
+        new Date(
+          user.lastResetAt
+        )
+      )
 
-deviceId,
+      / 1000
+      / 60
+      / 60;
 
-premium:false,
+    if (passed >= 24) {
 
-phase:"intro",
+      user.freeQuestionsUsed = 0;
 
-freeQuestionsUsed:0,
+      user.blockedAt = null;
 
-lastResetAt:new Date(),
+      user.lastResetAt =
+        new Date();
 
-blockedAt:null,
+      if (
+        user.phase === "blocked"
+      ) {
 
-name:null,
+        user.phase =
+          "training";
 
-level:null,
+      }
 
-fears:null,
+      await user.save();
 
-weakTopics:[]
+    }
 
-});
+    /*
+    ====================
+    PROTECTION
+    ====================
+    */
 
-}
+    if (
+      user.freeQuestionsUsed == null
+    ) {
 
+      user.freeQuestionsUsed = 0;
 
+    }
 
-/*
-====================
+    if (!user.phase) {
 
-SESSION
+      user.phase = "intro";
 
-====================
-*/
+    }
 
-let session =
+    /*
+    ====================
+    DEBUG
+    ====================
+    */
 
-await Session.findOne({
+    console.log(
+      "USER:",
+      user._id
+    );
 
-deviceId
+    console.log(
+      "FIREBASE:",
+      firebaseUid
+    );
 
-});
+    console.log(
+      "SESSION:",
+      session._id
+    );
 
+    /*
+    ====================
+    REQ
+    ====================
+    */
 
-if(!session){
+    req.user = user;
+    req.session = session;
 
-console.log(
-"NO SESSION"
-);
+    next();
 
-console.log(
-"CREATING SESSION..."
-);
+  }
 
+  catch (error) {
 
-session =
+    console.error(
+      "CHECK USER ERROR:",
+      error
+    );
 
-await Session.create({
+    return res.status(500).json({
 
-deviceId,
+      error:
+        "User middleware error",
 
-messages:[],
+      details:
+        error.message
 
-scores:[],
+    });
 
-weakTopics:[],
-
-lastTopic:null,
-
-updatedAt:new Date()
-
-});
-
-}
-
-
-
-/*
-====================
-
-RESET 24H
-
-====================
-*/
-
-const passed =
-
-(
-
-Date.now()
-
--
-
-new Date(
-
-user.lastResetAt
-
-)
-
-)
-
-/
-
-1000/
-
-60/
-
-60;
-
-
-
-if(
-
-passed>=24
-
-){
-
-console.log(
-"RESET LIMIT"
-);
-
-
-user.freeQuestionsUsed=0;
-
-user.blockedAt=
-null;
-
-user.lastResetAt=
-new Date();
-
-
-if(
-
-user.phase==="blocked"
-
-){
-
-user.phase=
-"training";
-
-}
-
-
-await user.save();
-
-}
-
-
-
-/*
-====================
-
-PROTECTION
-
-====================
-*/
-
-if(
-
-user.freeQuestionsUsed==null
-
-){
-
-user.freeQuestionsUsed=0;
-
-}
-
-
-if(
-
-!user.phase
-
-){
-
-user.phase=
-"intro";
-
-}
-
-
-
-/*
-====================
-
-DEBUG
-
-====================
-*/
-
-console.log(
-
-"USER:",
-
-user._id
-
-);
-
-console.log(
-
-"SESSION:",
-
-session._id
-
-);
-
-
-
-/*
-====================
-
-REQ
-
-====================
-*/
-
-req.user =
-user;
-
-req.session =
-session;
-
-
-next();
-
-}
-
-
-catch(error){
-
-console.error(
-
-"CHECK USER ERROR:",
-
-error
-
-);
-
-
-return res.status(500).json({
-
-error:
-"User middleware error",
-
-details:
-error.message
-
-});
-
-}
+  }
 
 }

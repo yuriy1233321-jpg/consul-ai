@@ -65,7 +65,7 @@ return () => unsubscribe();
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "x-device-id": deviceId,
+    "x-firebase-uid": auth.currentUser.uid,
   },
   body: JSON.stringify({
     message: textInput,
