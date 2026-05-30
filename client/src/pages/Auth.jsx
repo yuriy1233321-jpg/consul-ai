@@ -8,32 +8,50 @@ import {
 } from "../services/auth";
 
 function Auth() {
+
   const navigate = useNavigate();
 
   const language =
     localStorage.getItem("language") ||
     "українська";
 
-  const [email, setEmail] =
-    useState("");
-
-  const [password, setPassword] =
-    useState("");
-
-  const [loading, setLoading] =
-    useState(false);
-
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
   function text(ua, pl, ru) {
-    if (language === "polski")
-      return pl;
 
-    if (language === "русский")
-      return ru;
+    if (language === "polski") return pl;
+    if (language === "русский") return ru;
 
     return ua;
   }
 
+  async function syncUser(firebaseUser) {
+
+    const response = await fetch(
+      `${import.meta.env.VITE_API_URL}/api/auth/firebase`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name:
+            firebaseUser.displayName ||
+            firebaseUser.email
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    console.log("SYNC USER:", data);
+
+    return data;
+  }
 
   async function handleGoogle() {
 
@@ -41,7 +59,12 @@ function Auth() {
 
       setLoading(true);
 
-      await loginGoogle();
+      const result =
+        await loginGoogle();
+
+      await syncUser(
+        result.user
+      );
 
       navigate("/interview");
 
@@ -65,17 +88,20 @@ function Auth() {
 
   }
 
-
-
   async function handleLogin() {
 
     try {
 
       setLoading(true);
 
-      await loginEmail(
-        email,
-        password
+      const result =
+        await loginEmail(
+          email,
+          password
+        );
+
+      await syncUser(
+        result.user
       );
 
       navigate("/interview");
@@ -100,17 +126,20 @@ function Auth() {
 
   }
 
-
-
   async function handleRegister() {
 
     try {
 
       setLoading(true);
 
-      await registerEmail(
-        email,
-        password
+      const result =
+        await registerEmail(
+          email,
+          password
+        );
+
+      await syncUser(
+        result.user
       );
 
       navigate("/interview");
@@ -135,32 +164,28 @@ function Auth() {
 
   }
 
-
-
   return (
 
     <div style={containerStyle}>
 
-      <h1 style={{
-        textAlign:"center"
-      }}>
+      <h1
+        style={{
+          textAlign: "center"
+        }}
+      >
         CONSUL.AI
       </h1>
-
 
       <input
         required
         type="email"
         placeholder="Email"
         value={email}
-        onChange={(e)=>
-          setEmail(
-            e.target.value
-          )
+        onChange={(e) =>
+          setEmail(e.target.value)
         }
         style={inputStyle}
       />
-
 
       <input
         required
@@ -173,7 +198,7 @@ function Auth() {
           )
         }
         value={password}
-        onChange={(e)=>
+        onChange={(e) =>
           setPassword(
             e.target.value
           )
@@ -181,33 +206,27 @@ function Auth() {
         style={inputStyle}
       />
 
-
       <button
         onClick={handleLogin}
         disabled={loading}
         style={buttonStyle}
       >
-
         {
           loading
-          ? "..."
-          : text(
-              "Увійти",
-              "Zaloguj",
-              "Войти"
-            )
+            ? "..."
+            : text(
+                "Увійти",
+                "Zaloguj",
+                "Войти"
+              )
         }
-
       </button>
-
-
 
       <button
         onClick={handleRegister}
         disabled={loading}
         style={buttonStyle}
       >
-
         {
           text(
             "Реєстрація",
@@ -215,29 +234,21 @@ function Auth() {
             "Регистрация"
           )
         }
-
       </button>
-
-
 
       <button
         onClick={handleGoogle}
         disabled={loading}
         style={googleButton}
       >
-
         🔵 {
-
           text(
             "Увійти через Google",
             "Zaloguj przez Google",
             "Войти через Google"
           )
-
         }
-
       </button>
-
 
     </div>
 
@@ -245,79 +256,65 @@ function Auth() {
 
 }
 
-
-
 const containerStyle = {
 
-  maxWidth:"420px",
+  maxWidth: "420px",
+  margin: "80px auto",
+  padding: "40px",
 
-  margin:"80px auto",
+  display: "flex",
+  flexDirection: "column",
+  gap: "16px",
 
-  padding:"40px",
+  background: "#fff",
 
-  display:"flex",
-
-  flexDirection:"column",
-
-  gap:"16px",
-
-  background:"#fff",
-
-  borderRadius:"24px",
+  borderRadius: "24px",
 
   boxShadow:
-  "0 10px 30px rgba(0,0,0,.08)"
+    "0 10px 30px rgba(0,0,0,.08)"
 
 };
-
-
 
 const inputStyle = {
 
-  padding:"14px",
+  padding: "14px",
 
-  borderRadius:"12px",
+  borderRadius: "12px",
 
-  border:"1px solid #ddd",
+  border: "1px solid #ddd",
 
-  fontSize:"16px"
+  fontSize: "16px"
 
 };
-
-
 
 const buttonStyle = {
 
-  padding:"14px",
+  padding: "14px",
 
-  border:"none",
+  border: "none",
 
-  borderRadius:"12px",
+  borderRadius: "12px",
 
-  background:"#d62828",
+  background: "#d62828",
 
-  color:"#fff",
+  color: "#fff",
 
-  fontWeight:"700",
+  fontWeight: "700",
 
-  cursor:"pointer"
+  cursor: "pointer"
 
 };
-
-
 
 const googleButton = {
 
   ...buttonStyle,
 
-  background:"#fff",
+  background: "#fff",
 
-  color:"#111",
+  color: "#111",
 
-  border:"1px solid #ddd"
+  border: "1px solid #ddd"
 
 };
-
-
 
 export default Auth;
