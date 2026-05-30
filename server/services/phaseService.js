@@ -1,132 +1,160 @@
 export function updatePhase(
+  user,
+  msg,
+  aiResponse,
+  helpers = {}
+) {
 
-user,
-msg,
-aiResponse,
-helpers={}
+  const {
+    isValidName,
+    extractLevel,
+    CONFIRMATION_WORDS = []
+  } = helpers;
 
-){
+  const text =
+    msg?.trim() || "";
 
-const {
+  switch (user.phase) {
 
-isValidName,
-extractLevel,
-CONFIRMATION_WORDS=[]
+    /*
+    ====================
+    NAME
+    ====================
+    */
 
-}=helpers;
+    case "intro":
 
+      if (
+        isValidName(text)
+      ) {
 
+        user.name = text;
+        user.phase = "onboarding";
 
-switch(user.phase){
+      }
 
-case "intro":
+      break;
 
-if(
-isValidName(msg)
-){
+    /*
+    ====================
+    LEVEL
+    ====================
+    */
 
-user.name=msg;
-user.phase="onboarding";
+    case "onboarding": {
 
-}
+      const level =
+        extractLevel(text);
 
-break;
+      if (
+        level !== null
+      ) {
 
+        user.level = level;
+        user.phase = "diagnostic";
 
+      }
 
-case "onboarding":{
+      break;
+    }
 
-const level =
-extractLevel(msg);
+    /*
+    ====================
+    FEARS
+    ====================
+    */
 
-if(level!==null){
+    case "diagnostic":
 
-user.level=level;
-user.phase="diagnostic";
+      if (
+        text.length > 2
+      ) {
 
-}
+        user.fears = text;
 
-break;
-}
+      }
 
+      if (
+        aiResponse?.metadata?.weakTopicsDetected
+      ) {
 
+        user.weakTopics = [
 
-case "diagnostic":
+          ...new Set([
 
-if(msg.length>2){
+            ...(user.weakTopics || []),
 
-user.fears =
-user.fears
-?
-user.fears+"\n"+msg
-:
-msg;
+            ...aiResponse.metadata
+              .weakTopicsDetected
 
-}
+          ])
 
-if(
-aiResponse.metadata
-?.weakTopicsDetected
-){
+        ];
 
-user.weakTopics=[
+      }
 
-...new Set([
+      user.phase = "planning";
 
-...(user.weakTopics||[]),
+      break;
 
-...aiResponse.metadata
-.weakTopicsDetected
+    /*
+    ====================
+    PLAN CONFIRM
+    ====================
+    */
 
-])
+    case "planning": {
 
-];
+      const confirmed =
 
-}
+        CONFIRMATION_WORDS.some(
+          w =>
+            text
+              .toLowerCase()
+              .includes(
+                w.toLowerCase()
+              )
+        );
 
-user.phase="planning";
+      if (
 
-break;
+        confirmed ||
 
+        text.length > 20 ||
 
+        user.planningAttempts >= 2
 
-case "planning":{
+      ) {
 
-const confirmed=
+        user.phase =
+          "training";
 
-CONFIRMATION_WORDS.some(
+      }
 
-w=>
+      else {
 
-msg.toLowerCase()
+        user.planningAttempts =
+          (user.planningAttempts || 0) + 1;
 
-.includes(w)
+      }
 
-);
+      break;
+    }
 
-if(
-confirmed
-||
-msg.length>20
-||
-user.planningAttempts>=2
-){
+    /*
+    ====================
+    TRAINING
+    ====================
+    */
 
-user.phase=
-"training";
+    case "training":
+      break;
 
-}
-else{
+    default:
+      break;
 
-user.planningAttempts++;
+  }
 
-}
-
-break;
-}
-
-}
-
-return user;
+  return user;
 
 }
