@@ -12,15 +12,17 @@ IDENTITY
 */
 
 deviceId:{
+  type:String,
+  required:true,
+  unique:true,
+  index:true
+},
 
-type:String,
-
-required:true,
-
-unique:true,
-
-index:true
-
+firebaseUid:{
+  type:String,
+  unique:true,
+  sparse:true,
+  index:true
 },
 
 

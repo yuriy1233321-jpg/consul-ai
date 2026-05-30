@@ -14,7 +14,8 @@ from "./routes/chat.js";
 import paymentRoute
 from "./routes/payment.js";
 
-
+import firebaseAuthRoute
+from "./routes/firebaseAuth.js";
 
 /*
 ========================
@@ -142,6 +143,10 @@ dashboardRoute
 
 );
 
+app.use(
+  "/api/auth/firebase",
+  firebaseAuthRoute
+);
 
 /*
 Stripe
