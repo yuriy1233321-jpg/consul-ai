@@ -52,11 +52,7 @@ return () => unsubscribe();
   }
 
   async function sendToAI(textInput, selectedLanguage = language, selectedMode = mode) {
-    let deviceId = localStorage.getItem("deviceId");
-    if (!deviceId) {
-      deviceId = crypto.randomUUID();
-      localStorage.setItem("deviceId", deviceId);
-    }
+   
 
     try {
       const response = await fetch(
